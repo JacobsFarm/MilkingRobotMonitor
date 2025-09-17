@@ -1,5 +1,3 @@
-<img width="1919" height="1020" alt="image" src="https://github.com/user-attachments/assets/70d2f91c-55a5-4c20-8e14-1e6d8657eb5d" /># MilkingRobotMonitor
-
 MilkingRobotMonitor is a program designed to analyze and monitor data from milking robots. It works with the standard .txt files that contain universal data, regardless of the robot brand.
 
 The program extracts and organizes key information about each milking session, helping farmers and researchers gain better insights into cow performance and overall herd management.
