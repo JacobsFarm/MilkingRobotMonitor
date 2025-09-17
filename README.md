@@ -24,7 +24,7 @@ cd MilkingRobotMonitor
 
 Run the program:
 ```bash
-python milking_robot_monitor.py data.txt
+python milkingrobotmonitor.py
 ```
 
 Import the txt. file, exported from your robotmilking robots as Lely horizon, FullwoodJOZ Fullsense etc.
