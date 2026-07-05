@@ -1,7 +1,8 @@
 {
     "base_path": "milking_controle_data",
     "insights_path": "milking_insights",
-    "refresh_ms": 5000,
+    "refresh_ms": 30000,
+    "cache_ttl_ms": 15000,
     "yield_divisor": 1000,
     "vault": {
         "mode": "local",
