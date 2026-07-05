@@ -1,0 +1,2 @@
+# The uploader runs on the Python standard library only.
+# No third-party packages required.

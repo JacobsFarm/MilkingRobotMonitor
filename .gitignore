@@ -1,0 +1,40 @@
+# Local test vault (generated data, not source)
+evault_local/
+
+# Real settings and credentials — never commit (use the .example templates)
+**/config/settings.json
+**/config/epassport.json
+
+# Build output (PyInstaller .exe AND SvelteKit adapter-node both use build/ and dist/)
+build/
+dist/
+*.spec
+
+# Node / SvelteKit
+node_modules/
+.svelte-kit/
+.vite/
+*.timestamp-*
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+
+# Environments
+.venv
+env/
+venv/
+ENV/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

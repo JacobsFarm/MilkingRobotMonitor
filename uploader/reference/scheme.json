@@ -1,0 +1,68 @@
+{
+    "dataset_info": {
+        "description": "Milking records from milking robot",
+        "columns": [
+            {
+                "name": "animalNumber",
+                "type": "Integer",
+                "description": "The unique identification number assigned to the cow."
+            },
+            {
+                "name": "registrationNumber",
+                "type": "String",
+                "description": "The official national identification number."
+            },
+            {
+                "name": "milkingDate",
+                "type": "Date",
+                "description": "The calendar date of the milking session."
+            },
+            {
+                "name": "milkingTime",
+                "type": "Time",
+                "description": "The timestamp of the milking session."
+            },
+            {
+                "name": "endOfMilkingStatus",
+                "type": "Integer (Enum)",
+                "description": "The status outcome (0=Unknown, 1=TooLow, 2=YieldCarryOver, 3=OK, 4=Reject)."
+            },
+            {
+                "name": "currentYield",
+                "type": "Double",
+                "description": "The amount of milk produced (in centiliters or grams)."
+            },
+            {
+                "name": "frameNumber",
+                "type": "Integer",
+                "description": "Identifier for the milking stall frame."
+            },
+            {
+                "name": "bottleNumber",
+                "type": "Integer",
+                "description": "Identifier for the sample bottle."
+            },
+            {
+                "name": "systemCode",
+                "type": "Integer",
+                "description": "Random Internal system code associated with the animal."
+            }
+        ],
+        "status_code_explanations": {
+            "OK": "Successful milking session (endOfMilkingStatus = 3).",
+            "!": "Incomplete or interrupted milking session (endOfMilkingStatus = 1 or 2).",
+            "#": "Failed connection or zero-yield session (endOfMilkingStatus = 4 or other)."
+        }
+    },
+    "example_record": {
+        "animalNumber": 5256,
+        "registrationNumber": "NL 660752569",
+        "milkingDate": "2025-10-16",
+        "milkingTime": "16:45:14",
+        "endOfMilkingStatus": "OK",
+        "currentYield": 13430,
+        "frameNumber": "-",
+        "bottleNumber": "-",
+        "systemCode": 43800
+    }
+}

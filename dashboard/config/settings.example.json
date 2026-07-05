@@ -1,0 +1,13 @@
+{
+    "base_path": "milking_controle_data",
+    "insights_path": "milking_insights",
+    "refresh_ms": 5000,
+    "yield_divisor": 1000,
+    "vault": {
+        "mode": "local",
+        "local_path": "../evault_local",
+        "endpoint": "https://evault.example.org/graphql",
+        "epassport_path": "config/epassport.json",
+        "ontology": "milking_controle_data"
+    }
+}

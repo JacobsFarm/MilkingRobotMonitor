@@ -1,0 +1,13 @@
+{
+    "data_directory": "../data",
+    "file_pattern": "*.txt",
+    "base_path": "milking_controle_data",
+    "watch_interval_seconds": 60,
+    "vault": {
+        "mode": "local",
+        "local_path": "../evault_local",
+        "endpoint": "https://evault.example.org/graphql",
+        "epassport_path": "config/epassport.json",
+        "ontology": "milking_controle_data"
+    }
+}
