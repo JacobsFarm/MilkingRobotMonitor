@@ -1,6 +1,10 @@
 # Local test vault (generated data, not source)
 evault_local/
 
+# Raw milk control data (private farm data — never commit)
+data/*
+!data/README.md
+
 # Real settings and credentials — never commit (use the .example templates)
 **/config/settings.json
 **/config/epassport.json

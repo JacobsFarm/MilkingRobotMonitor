@@ -18,7 +18,7 @@ A modular system for managing milking control data, using a MetaState eVault as 
 
 - **[uploader/](uploader/)** — Python program that reads raw milking control files, cleans them, and writes JSON records to the eVault path `milking_controle_data/[animalNumber]/[unique_id]`. The yield stays **raw** (`yield_raw`) so the stored data remains machine-readable for the AI layer; the dashboard converts to liters at display time.
 - **[dashboard/](dashboard/)** — SvelteKit web dashboard, made to run on a Raspberry Pi and be viewed from any browser (phone, tablet, laptop). Prepared for the `milking_insights` AI path, and can later be packaged as a native desktop/mobile app (Tauri/Capacitor) from the same codebase.
-- **[data/](data/)** — example raw milking control files (FULLSENSE format) used for local testing.
+- **[data/](data/)** — folder where the raw milking control files (FULLSENSE format) go. The files themselves are private and gitignored; only a placeholder README is committed.
 
 Each program is self-contained: the uploader runs on the farm PC, a dashboard runs wherever you want to look. They share nothing but the eVault. A future AI layer joins the same way: it subscribes to `milking_controle_data`, computes insights (anomaly detection, yield prediction), and writes them back to the vault under `milking_insights` — no changes to the other programs needed.
 
@@ -104,5 +104,5 @@ Interpretation (like liters = `yield_raw / 1000`) happens in the readers, never 
 
 - Records whose `animalNumber` is not exactly 4 digits are ignored by the uploader.
 - After this raw-data change, rebuild the local test vault once: delete `evault_local/` and run the uploader again.
-- The `data/` folder contains real registration numbers as example data; remove or replace it before publishing if that is a concern.
+- The raw files in `data/` and the local vault in `evault_local/` are gitignored — they hold private farm data and never reach GitHub.
 - The GraphQL calls in the vault clients (`uploader/app/vault_client.py` and `dashboard/src/lib/server/vault.js`) are written conceptually against the MetaState eVault core API and should be verified against your deployed eVault version.
