@@ -17,10 +17,18 @@ def run_once(settings, vault):
     )
     records = transform_all(raw_records)
     base_path = settings.get("base_path", "milking_controle_data")
-    for record in records:
+    # The real eVault creates a new envelope on every store (no overwrite on our
+    # record id), so check what is already stored and only upload new records.
+    existing_ids = {record.get("id") for record in vault.fetch_all(base_path)}
+    new_records = [record for record in records if record["id"] not in existing_ids]
+    for record in new_records:
         vault.store(f"{base_path}/{record['animal_number']}/{record['id']}", record)
     logger.info(
-        "Uploaded %d unique records from %d raw rows", len(records), len(raw_records)
+        "Uploaded %d new records (%d parsed from %d raw rows, %d already stored)",
+        len(new_records),
+        len(records),
+        len(raw_records),
+        len(records) - len(new_records),
     )
 
 

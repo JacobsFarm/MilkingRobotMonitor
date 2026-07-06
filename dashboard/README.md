@@ -17,8 +17,7 @@ dashboard/
 ├── svelte.config.js
 ├── vite.config.js
 ├── config/
-│   ├── settings.example.json   Template (copy to settings.json)
-│   └── epassport.example.json
+│   └── settings.example.json   Template (copy to settings.json)
 └── src/
     ├── app.html
     ├── lib/server/
@@ -55,11 +54,15 @@ Serve it permanently with a systemd service or `pm2`. Run the command from insid
 
 ## Settings (`config/settings.json`)
 
-- `vault.mode` — `local` (file-based test vault) or `evault` (MetaState eVault over GraphQL).
+- `vault.mode` — `local` (file-based test vault) or `evault` (MetaState W3DS eVault over GraphQL).
 - `vault.local_path` — the folder the uploader writes to in local mode (relative to this folder).
-- `vault.endpoint` / `vault.epassport_path` — eVault GraphQL endpoint and ePassport credential for `evault` mode.
+- `vault.registry_url` — base URL of the W3DS Registry (evault mode): resolves the eVault endpoint (`GET /resolve?w3id=...`) and issues the platform token (`POST /platforms/certification`).
+- `vault.w3id` — the w3id (eName) whose eVault is read; sent as `X-ENAME` header on every GraphQL call.
+- `vault.platform` — platform name used when requesting a certification token.
+- `vault.schema_ids` — map of logical collection name → W3ID (schemaId) of the JSON Schema registered in the Ontology service.
 - `yield_divisor` — raw yield units per liter (display conversion only).
-- `refresh_ms` — how often the browser polls for new records.
+- `refresh_ms` — how often the browser checks for new records (a signature check; the full dataset is only re-sent when something changed).
+- `cache_ttl_ms` — how long the server caches the vault contents, protecting the eVault from repeated full fetches.
 
 ## Desktop app (Tauri) — later step
 

@@ -9,7 +9,7 @@ else:
 
 DEFAULT_SETTINGS_PATH = PROGRAM_ROOT / "config" / "settings.json"
 PATH_KEYS = ("data_directory",)
-VAULT_PATH_KEYS = ("local_path", "epassport_path")
+VAULT_PATH_KEYS = ("local_path",)
 
 
 def _resolve(relative_path):

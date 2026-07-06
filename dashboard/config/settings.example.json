@@ -7,8 +7,12 @@
     "vault": {
         "mode": "local",
         "local_path": "../evault_local",
-        "endpoint": "https://evault.example.org/graphql",
-        "epassport_path": "config/epassport.json",
-        "ontology": "milking_controle_data"
+        "registry_url": "https://registry.example.org",
+        "w3id": "@your-farm.w3id",
+        "platform": "melkmonitor-dashboard",
+        "schema_ids": {
+            "milking_controle_data": "PASTE-SCHEMA-W3ID-FROM-ONTOLOGY-SERVICE-HERE",
+            "milking_insights": "PASTE-SCHEMA-W3ID-FROM-ONTOLOGY-SERVICE-HERE"
+        }
     }
 }

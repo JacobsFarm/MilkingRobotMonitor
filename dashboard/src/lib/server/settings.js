@@ -12,8 +12,5 @@ export function loadSettings() {
     if (vault.local_path) {
         vault.local_path = path.resolve(PROGRAM_ROOT, vault.local_path);
     }
-    if (vault.epassport_path) {
-        vault.epassport_path = path.resolve(PROGRAM_ROOT, vault.epassport_path);
-    }
     return settings;
 }
