@@ -27,9 +27,32 @@ Each program is self-contained: the uploader runs on the farm PC, a dashboard ru
 Both programs support two vault backends, switched with `vault.mode` in their `config/settings.json`:
 
 - `local` — a file-based stand-in vault (folder `evault_local/`) for development and testing without any credentials. This is the default.
-- `evault` — the real MetaState eVault over GraphQL, using the farm ePassport for authentication.
+- `evault` — the real MetaState eVault over GraphQL. Authentication is automatic: the program fetches a short-lived platform token from the Registry (`POST /platforms/certification`); there is no password or key file to manage.
 
-Switching from local testing to a real eVault is only a config change (`mode`, `endpoint`, and the ePassport file); no application code changes.
+Switching from local testing to a real eVault is only a config change (`vault.mode`, `registry_url`, `w3id`); no application code changes. See **Going live on the real eVault** below.
+
+## Going live on the real eVault
+
+The GraphQL clients (`uploader/app/vault_client.py`, `dashboard/src/lib/server/vault.js`) are verified against the live MetaState W3DS production API (registry/eVault schema introspected 2026-07). To switch a program from `local` to the real eVault, set in its `config/settings.json`:
+
+```json
+"vault": {
+    "mode": "evault",
+    "registry_url": "https://registry.w3ds.metastate.foundation",
+    "w3id": "@your-farm-ename",
+    "platform": "melkmonitor-uploader",
+    "schema_ids": { "milking_controle_data": "milking_controle_data" }
+}
+```
+
+Production services: Registry `https://registry.w3ds.metastate.foundation`, Ontology `https://ontology.w3ds.metastate.foundation`, Provisioner `https://provisioner.w3ds.metastate.foundation`.
+
+Two things you must supply:
+
+1. **`w3id`** — the farm's own eName, i.e. a provisioned eVault. Create it once with the eID Wallet (or the Provisioner's `POST /provision` flow). This is the eVault all programs read from and write to.
+2. **`schema_ids`** — the ontology id per collection. A plain stable string (as above) works out of the box: store and fetch just have to agree on it. Registering the record as a JSON Schema in the Ontology service and using its W3ID here is only needed later, so that *other* W3DS platforms can interpret the data.
+
+`platform` can be any name; the Registry issues a token for it with no pre-registration.
 
 ## Quick start (local test)
 
@@ -105,4 +128,3 @@ Interpretation (like liters = `yield_raw / 1000`) happens in the readers, never 
 - Records whose `animalNumber` is not exactly 4 digits are ignored by the uploader.
 - After this raw-data change, rebuild the local test vault once: delete `evault_local/` and run the uploader again.
 - The raw files in `data/` and the local vault in `evault_local/` are gitignored — they hold private farm data and never reach GitHub.
-- The GraphQL calls in the vault clients (`uploader/app/vault_client.py` and `dashboard/src/lib/server/vault.js`) are written conceptually against the MetaState eVault core API and should be verified against your deployed eVault version.

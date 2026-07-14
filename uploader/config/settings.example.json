@@ -4,13 +4,13 @@
     "base_path": "milking_controle_data",
     "watch_interval_seconds": 60,
     "vault": {
-        "mode": "local",
+        "mode": "evault",
         "local_path": "../evault_local",
-        "registry_url": "https://registry.example.org",
-        "w3id": "@your-farm.w3id",
+        "registry_url": "https://registry.w3ds.metastate.foundation",
+        "w3id": "@your-farm-ename",
         "platform": "melkmonitor-uploader",
         "schema_ids": {
-            "milking_controle_data": "PASTE-SCHEMA-W3ID-FROM-ONTOLOGY-SERVICE-HERE"
+            "milking_controle_data": "milking_controle_data"
         }
     }
 }

@@ -1,4 +1,5 @@
 import json
+import logging
 import threading
 import time
 import urllib.error
@@ -7,12 +8,21 @@ import urllib.request
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+logger = logging.getLogger("uploader.vault")
+
 
 class VaultClient(ABC):
 
     @abstractmethod
     def store(self, path, record):
         raise NotImplementedError
+
+    def store_many(self, items):
+        """Store many (path, record) pairs. Default: one store() per item.
+        Backends with a native bulk API (the real eVault) override this to send
+        a single request, which is both faster and avoids per-record rate limits."""
+        for path, record in items:
+            self.store(path, record)
 
     @abstractmethod
     def fetch_all(self, prefix):
@@ -86,19 +96,24 @@ class LocalVaultClient(VaultClient):
 class MetaStateEVaultClient(VaultClient):
     """Client for the real MetaState W3DS eVault.
 
-    Flow (verified against docs.w3ds.metastate.foundation and the prototype
-    repo's web3-adapter EVaultClient, 2026-07):
+    Flow (verified 2026-07 against the live production registry/eVault via
+    GraphQL introspection, plus the prototype repo's web3-adapter EVaultClient):
 
     1. Resolve the eVault endpoint of the configured w3id via the Registry:
-       GET {registry_url}/resolve?w3id=@... -> eVault URI; GraphQL lives at /graphql.
+       GET {registry_url}/resolve?w3id=@... -> {"uri": ...}; the GraphQL endpoint
+       is always /graphql on that URI's origin.
     2. Obtain a platform token: POST {registry_url}/platforms/certification
-       with {"platform": ...} -> {"token", "expiresAt"}. Refreshed near expiry.
+       with {"platform": ...} -> {"token"} (optional "expiresAt"). Any platform
+       name is accepted; the token is refreshed near expiry / on 401.
     3. Every GraphQL call carries both "Authorization: Bearer <token>" and
        "X-ENAME: <w3id>" headers.
-    4. Store via storeMetaEnvelope; the "ontology" is the W3ID (schemaId) of a
-       JSON Schema pre-registered in the Ontology service, mapped per logical
-       collection in settings under vault.schema_ids.
-    5. Fetch via the cursor-paginated metaEnvelopes query filtered by ontology.
+    4. Store via storeMetaEnvelope(input: {ontology, payload, acl}). The
+       "ontology" is any stable schema identifier: a plain logical name works
+       (the adapter itself stores ontology "reference"); registering it as a
+       JSON Schema W3ID in the Ontology service is only needed so *other*
+       platforms can interpret the data. Mapped per collection under
+       vault.schema_ids.
+    5. Fetch via the cursor-paginated metaEnvelopes query filtered by ontologyId.
 
     Note: storeMetaEnvelope creates a new envelope on every call (not idempotent
     on our record id), so callers must deduplicate before storing — see pipeline.
@@ -106,11 +121,23 @@ class MetaStateEVaultClient(VaultClient):
 
     TOKEN_REFRESH_MARGIN_SECONDS = 5 * 60
     PAGE_SIZE = 500
+    BULK_CHUNK_SIZE = 200  # records per bulkCreateMetaEnvelopes call
+    MAX_RETRIES = 5
+    MAX_BACKOFF_SECONDS = 30
 
     STORE_MUTATION = """
         mutation StoreMetaEnvelope($input: MetaEnvelopeInput!) {
             storeMetaEnvelope(input: $input) {
                 metaEnvelope { id ontology parsed }
+            }
+        }
+    """
+
+    BULK_STORE_MUTATION = """
+        mutation BulkCreate($inputs: [BulkMetaEnvelopeInput!]!) {
+            bulkCreateMetaEnvelopes(inputs: $inputs) {
+                successCount
+                errorCount
             }
         }
     """
@@ -150,13 +177,15 @@ class MetaStateEVaultClient(VaultClient):
             return self._endpoint
         url = f"{self.registry_url}/resolve?w3id={urllib.parse.quote(self.w3id)}"
         body = self._http_json(url)
-        # TODO(evault): verify the exact response shape of /resolve against a
-        # test registry; the adapter reads the eVault URI from it.
-        uri = body.get("uri") or body.get("evault") or body.get("endpoint")
+        # Resolve response: {"ename", "uri", "evault", ...}; "uri" is the eVault
+        # origin (e.g. "http://host:4000"). "evault" is an id, not a URL.
+        uri = body.get("uri")
         if not uri:
             raise RuntimeError(f"Registry resolve returned no eVault URI for {self.w3id}: {body}")
-        uri = uri.rstrip("/")
-        self._endpoint = uri if uri.endswith("/graphql") else f"{uri}/graphql"
+        # GraphQL always lives at /graphql on the eVault's origin, ignoring any
+        # path the resolved URI may carry (matches the web3-adapter EVaultClient).
+        parts = urllib.parse.urlsplit(uri)
+        self._endpoint = f"{parts.scheme}://{parts.netloc}/graphql"
         return self._endpoint
 
     def _get_token(self):
@@ -182,7 +211,8 @@ class MetaStateEVaultClient(VaultClient):
 
     def _graphql(self, query, variables):
         endpoint = self._resolve_endpoint()
-        for attempt in (1, 2):
+        token_refreshed = False
+        for attempt in range(self.MAX_RETRIES):
             headers = {
                 "Authorization": f"Bearer {self._get_token()}",
                 "X-ENAME": self.w3id,
@@ -190,13 +220,32 @@ class MetaStateEVaultClient(VaultClient):
             try:
                 body = self._http_json(endpoint, {"query": query, "variables": variables}, headers)
             except urllib.error.HTTPError as error:
-                if error.code in (401, 403) and attempt == 1:
+                if error.code in (401, 403) and not token_refreshed:
                     self._token = None  # token expired or revoked: fetch a fresh one
+                    token_refreshed = True
+                    continue
+                # 429 Too Many Requests / 5xx are transient: back off and retry.
+                if (error.code == 429 or 500 <= error.code < 600) and attempt < self.MAX_RETRIES - 1:
+                    self._sleep_backoff(error, attempt)
                     continue
                 raise
             if body.get("errors"):
                 raise RuntimeError(body["errors"])
             return body["data"]
+        raise RuntimeError("GraphQL request failed after retries")
+
+    def _sleep_backoff(self, error, attempt):
+        retry_after = None
+        headers = getattr(error, "headers", None)
+        if headers is not None:
+            value = headers.get("Retry-After")
+            if value:
+                try:
+                    retry_after = float(value)
+                except ValueError:
+                    retry_after = None
+        delay = retry_after if retry_after is not None else min(2 ** attempt, self.MAX_BACKOFF_SECONDS)
+        time.sleep(delay)
 
     def _schema_for(self, path):
         logical = path.split("/", 1)[0]
@@ -222,6 +271,32 @@ class MetaStateEVaultClient(VaultClient):
             },
         )
 
+    def store_many(self, items):
+        # Group by ontology (derived from each path) and send each group as a
+        # few bulk requests instead of one request per record — this is what
+        # keeps large uploads under the eVault's per-request rate limit.
+        groups = {}
+        for path, record in items:
+            groups.setdefault(self._schema_for(path), []).append(record)
+        total = sum(len(records) for records in groups.values())
+        done = 0
+        for ontology, records in groups.items():
+            for start in range(0, len(records), self.BULK_CHUNK_SIZE):
+                chunk = records[start : start + self.BULK_CHUNK_SIZE]
+                inputs = [
+                    {"ontology": ontology, "payload": record, "acl": ["*"]}
+                    for record in chunk
+                ]
+                data = self._graphql(self.BULK_STORE_MUTATION, {"inputs": inputs})
+                result = data["bulkCreateMetaEnvelopes"]
+                if result.get("errorCount"):
+                    raise RuntimeError(
+                        f"bulkCreateMetaEnvelopes: {result['errorCount']} of "
+                        f"{len(chunk)} records failed for ontology '{ontology}'"
+                    )
+                done += len(chunk)
+                logger.info("eVault upload progress: %d/%d records", done, total)
+
     def fetch_all(self, prefix):
         schema_id = self._schema_for(prefix)
         records = []
@@ -230,8 +305,6 @@ class MetaStateEVaultClient(VaultClient):
             data = self._graphql(
                 self.FETCH_QUERY,
                 {
-                    # TODO(evault): verify the filter field name (ontologyId vs
-                    # ontology) against the deployed eVault schema.
                     "filter": {"ontologyId": schema_id},
                     "first": self.PAGE_SIZE,
                     "after": after,

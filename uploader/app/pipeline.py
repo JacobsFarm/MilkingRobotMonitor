@@ -21,8 +21,10 @@ def run_once(settings, vault):
     # record id), so check what is already stored and only upload new records.
     existing_ids = {record.get("id") for record in vault.fetch_all(base_path)}
     new_records = [record for record in records if record["id"] not in existing_ids]
-    for record in new_records:
-        vault.store(f"{base_path}/{record['animal_number']}/{record['id']}", record)
+    vault.store_many(
+        (f"{base_path}/{record['animal_number']}/{record['id']}", record)
+        for record in new_records
+    )
     logger.info(
         "Uploaded %d new records (%d parsed from %d raw rows, %d already stored)",
         len(new_records),
