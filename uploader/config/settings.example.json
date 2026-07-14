@@ -1,8 +1,13 @@
 {
-    "data_directory": "../data",
-    "file_pattern": "*.txt",
-    "base_path": "milking_controle_data",
     "watch_interval_seconds": 60,
+    "sources": [
+        {
+            "type": "milking_robot",
+            "collection": "milking_controle_data",
+            "data_directory": "../data",
+            "file_pattern": "*.txt"
+        }
+    ],
     "vault": {
         "mode": "evault",
         "local_path": "../evault_local",

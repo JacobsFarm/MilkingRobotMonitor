@@ -17,12 +17,16 @@ class VaultClient(ABC):
     def store(self, path, record):
         raise NotImplementedError
 
-    def store_many(self, items):
+    def store_many(self, items, on_stored=None):
         """Store many (path, record) pairs. Default: one store() per item.
         Backends with a native bulk API (the real eVault) override this to send
-        a single request, which is both faster and avoids per-record rate limits."""
+        chunked requests, which is both faster and avoids per-record rate limits.
+        ``on_stored(records)`` is called after every successfully stored batch,
+        so callers can persist sync state incrementally."""
         for path, record in items:
             self.store(path, record)
+            if on_stored:
+                on_stored([record])
 
     @abstractmethod
     def fetch_all(self, prefix):
@@ -248,14 +252,12 @@ class MetaStateEVaultClient(VaultClient):
         time.sleep(delay)
 
     def _schema_for(self, path):
+        # Without an explicit mapping the collection name itself is the
+        # ontology id (a plain stable string works — store and fetch just have
+        # to agree). Register a JSON Schema in the Ontology service and map its
+        # W3ID under vault.schema_ids for cross-platform interop.
         logical = path.split("/", 1)[0]
-        schema_id = self.schema_ids.get(logical)
-        if not schema_id:
-            raise RuntimeError(
-                f"No schema id configured for '{logical}'. Register the JSON Schema in the "
-                "Ontology service and add its W3ID under vault.schema_ids in settings.json."
-            )
-        return schema_id
+        return self.schema_ids.get(logical, logical)
 
     # -- VaultClient interface ---------------------------------------------
 
@@ -271,7 +273,7 @@ class MetaStateEVaultClient(VaultClient):
             },
         )
 
-    def store_many(self, items):
+    def store_many(self, items, on_stored=None):
         # Group by ontology (derived from each path) and send each group as a
         # few bulk requests instead of one request per record — this is what
         # keeps large uploads under the eVault's per-request rate limit.
@@ -294,6 +296,8 @@ class MetaStateEVaultClient(VaultClient):
                         f"bulkCreateMetaEnvelopes: {result['errorCount']} of "
                         f"{len(chunk)} records failed for ontology '{ontology}'"
                     )
+                if on_stored:
+                    on_stored(chunk)
                 done += len(chunk)
                 logger.info("eVault upload progress: %d/%d records", done, total)
 

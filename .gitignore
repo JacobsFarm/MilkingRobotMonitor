@@ -9,6 +9,9 @@ data/*
 **/config/settings.json
 **/config/epassport.json
 
+# Uploader sync state (which record ids are already uploaded) — machine-local
+uploader/state/
+
 # Build output (PyInstaller .exe AND SvelteKit adapter-node both use build/ and dist/)
 build/
 dist/

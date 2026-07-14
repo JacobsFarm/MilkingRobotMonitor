@@ -3,18 +3,11 @@
     import ChartBox from '$lib/components/ChartBox.svelte';
     import Heatmap from '$lib/components/Heatmap.svelte';
     import MultiSelect from '$lib/components/MultiSelect.svelte';
-    import {
-        DAY_LABELS,
-        MAX_INTERVAL_HOURS,
-        buildHeatmaps,
-        computeIntervals,
-        enrich,
-        fmt,
-        mean,
-        monthLabel,
-        sum,
-        weekLabel
-    } from '$lib/stats.js';
+    import { DAY_LABELS, fmt, monthLabel, weekLabel } from '$lib/format.js';
+
+    // Deze pagina is puur presentatie: alle statistiek wordt op de server
+    // berekend (lib/server/aggregate.js) en komt kant-en-klaar binnen via
+    // /api/stats. Filters gaan als query-parameters mee naar de server.
 
     const STATUS_STYLES = {
         OK: { color: '#2e8b57', label: 'Geslaagd' },
@@ -22,24 +15,51 @@
         '#': { color: '#c0392b', label: 'Fout' }
     };
 
-    let records = {};
-    let refreshMs = 30000;
-    let yieldDivisor = 1000;
-    let timer;
-    let loadError = '';
+    const EMPTY_STATS = {
+        options: { cows: [], months: [], weeks: [] },
+        filtered: { count: 0, of: 0 },
+        totals: {
+            count: 0,
+            cowCount: 0,
+            totalLiters: 0,
+            avgPerMilking: null,
+            milkingsPerCowDay: null,
+            avgIntervalHours: null
+        },
+        heatmaps: {
+            count: Array.from({ length: 7 }, () => Array(24).fill(null)),
+            avgLiters: Array.from({ length: 7 }, () => Array(24).fill(null))
+        },
+        hourly: {
+            count: Array(24).fill(0),
+            totalLiters: Array(24).fill(0),
+            avgPerMilking: Array(24).fill(null),
+            cumulative: Array(24).fill(0)
+        },
+        weekday: { count: Array(7).fill(0), totalLiters: Array(7).fill(0) },
+        intervals: { bins: Array(12).fill(0), binHours: 2, maxHours: 24, perCowTop: [] },
+        dailyTrend: { labels: [], liters: [], counts: [] },
+        status: [],
+        weekly: { labels: [], counts: [], liters: [] },
+        recent: []
+    };
 
-    // Ophaal-status voor de "slimme" poll: we sturen de laatst bekende
-    // signature mee zodat de server niets terugstuurt als er niets veranderd is.
-    let lastSignature = '';
-    let lastUpdated = null;
-    let lastChecked = null;
+    let stats = EMPTY_STATS;
+    let progress = { complete: true, loaded: null };
+    let refreshMs = 30000;
+    let loadError = '';
     let loading = false;
 
-    function clockLabel(date) {
-        return date
-            ? date.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-            : '–';
-    }
+    // Slimme poll: de signature dekt dataset + filters; bij een match stuurt
+    // de server een lege "unchanged"-respons in plaats van dezelfde cijfers.
+    let lastSignature = '';
+    let lastLoadedFilterKey = null;
+    let lastUpdated = null;
+    let lastChecked = null;
+
+    let mounted = false;
+    let pollTimer = null;
+    let debounceTimer = null;
 
     // Filters
     let selectedCows = [];
@@ -47,6 +67,98 @@
     let selectedWeeks = [];
     let dateFrom = '';
     let dateTo = '';
+
+    $: filterKey = JSON.stringify([
+        [...selectedCows].sort(),
+        [...selectedMonths].sort(),
+        [...selectedWeeks].sort(),
+        dateFrom,
+        dateTo
+    ]);
+    $: if (mounted) {
+        onFiltersChanged(filterKey);
+    }
+
+    function onFiltersChanged(key) {
+        if (key === lastLoadedFilterKey) {
+            return;
+        }
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(load, 250);
+    }
+
+    function buildQuery() {
+        const params = new URLSearchParams();
+        if (selectedCows.length) params.set('cows', selectedCows.join(','));
+        if (selectedMonths.length) params.set('months', selectedMonths.join(','));
+        if (selectedWeeks.length) params.set('weeks', selectedWeeks.join(','));
+        if (dateFrom) params.set('from', dateFrom);
+        if (dateTo) params.set('to', dateTo);
+        if (lastSignature) params.set('sig', lastSignature);
+        const query = params.toString();
+        return query ? `?${query}` : '';
+    }
+
+    async function load() {
+        if (loading) {
+            return;
+        }
+        loading = true;
+        const requestedKey = filterKey;
+        try {
+            const response = await fetch(`/api/stats${buildQuery()}`);
+            if (!response.ok) {
+                loadError = `Vault request failed (${response.status})`;
+                return;
+            }
+            const payload = await response.json();
+            refreshMs = payload.refresh_ms ?? refreshMs;
+            progress = payload.progress ?? progress;
+            lastChecked = new Date();
+            lastSignature = payload.signature ?? '';
+            lastLoadedFilterKey = requestedKey;
+            if (!payload.unchanged && payload.stats) {
+                stats = payload.stats;
+                lastUpdated = new Date();
+            }
+            loadError = '';
+        } catch (error) {
+            loadError = String(error);
+        } finally {
+            loading = false;
+            if (filterKey !== requestedKey) {
+                // Filters zijn tijdens het laden veranderd: meteen opnieuw.
+                load();
+            } else {
+                schedulePoll();
+            }
+        }
+    }
+
+    function schedulePoll() {
+        clearTimeout(pollTimer);
+        // Tijdens het vullen van de eVault-cache vaker verversen, zodat de
+        // grafieken zichtbaar vollopen; daarna het normale interval.
+        const wait = progress?.complete === false ? 4000 : refreshMs;
+        pollTimer = setTimeout(load, wait);
+    }
+
+    onMount(() => {
+        lastLoadedFilterKey = filterKey;
+        mounted = true;
+        load();
+    });
+
+    onDestroy(() => {
+        clearTimeout(pollTimer);
+        clearTimeout(debounceTimer);
+    });
+
+    function clockLabel(date) {
+        return date
+            ? date.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+            : '–';
+    }
 
     function statusStyle(status) {
         return STATUS_STYLES[status] ?? STATUS_STYLES['#'];
@@ -60,130 +172,45 @@
         dateTo = '';
     }
 
-    async function load() {
-        if (loading) {
-            return;
-        }
-        loading = true;
-        try {
-            const query = lastSignature ? `?sig=${encodeURIComponent(lastSignature)}` : '';
-            const response = await fetch(`/api/records${query}`);
-            if (!response.ok) {
-                loadError = `Vault request failed (${response.status})`;
-                return;
-            }
-            const payload = await response.json();
-            refreshMs = payload.refresh_ms ?? refreshMs;
-            yieldDivisor = payload.yield_divisor ?? yieldDivisor;
-            lastChecked = new Date();
-            lastSignature = payload.signature ?? lastSignature;
-            if (!payload.unchanged) {
-                const next = { ...records };
-                for (const record of payload.records) {
-                    next[record.id] = record;
-                }
-                records = next;
-                lastUpdated = new Date();
-            }
-            loadError = '';
-        } catch (error) {
-            loadError = String(error);
-        } finally {
-            loading = false;
-        }
-    }
-
-    onMount(async () => {
-        await load();
-        timer = setInterval(load, refreshMs);
-    });
-
-    onDestroy(() => {
-        if (timer) {
-            clearInterval(timer);
-        }
-    });
-
-    // ---- Basisdata ----
-    $: enriched = Object.values(records)
-        .map((record) => enrich(record, yieldDivisor))
-        .filter((record) => !Number.isNaN(record.date.getTime()))
-        .sort((a, b) => a.date - b.date);
-
-    $: cowOptions = [...new Set(enriched.map((r) => String(r.animal_number)))]
-        .sort((a, b) => Number(a) - Number(b))
-        .map((cow) => ({ value: cow, label: `Koe ${cow}` }));
-    $: monthOptions = [...new Set(enriched.map((r) => r.monthKey))]
-        .sort()
-        .map((month) => ({ value: month, label: monthLabel(month) }));
-    $: weekOptions = [...new Set(enriched.map((r) => r.weekKey))]
-        .sort()
-        .map((week) => ({ value: week, label: weekLabel(week) }));
-
-    // ---- Filtering ----
-    $: cowSet = new Set(selectedCows);
-    $: monthSet = new Set(selectedMonths);
-    $: weekSet = new Set(selectedWeeks);
-    // Verwissel van/tot als ze omgekeerd zijn ingevuld.
-    $: rangeFrom = dateFrom && dateTo && dateFrom > dateTo ? dateTo : dateFrom;
-    $: rangeTo = dateFrom && dateTo && dateFrom > dateTo ? dateFrom : dateTo;
-    $: filtered = enriched.filter(
-        (r) =>
-            (cowSet.size === 0 || cowSet.has(String(r.animal_number))) &&
-            (monthSet.size === 0 || monthSet.has(r.monthKey)) &&
-            (weekSet.size === 0 || weekSet.has(r.weekKey)) &&
-            (!rangeFrom || r.dayKey >= rangeFrom) &&
-            (!rangeTo || r.dayKey <= rangeTo)
-    );
-
-    $: filteredCowCount = new Set(filtered.map((r) => String(r.animal_number))).size;
-
-    // ---- Tijd tussen melkingen ----
-    $: ({ intervals, byRecordId: intervalByRecord } = computeIntervals(filtered));
-    $: avgInterval = mean(intervals.map((i) => i.hours));
+    // ---- Filteropties (waarden van de server, labels hier) ----
+    $: cowOptions = stats.options.cows.map((cow) => ({ value: cow, label: `Koe ${cow}` }));
+    $: monthOptions = stats.options.months.map((month) => ({
+        value: month,
+        label: monthLabel(month)
+    }));
+    $: weekOptions = stats.options.weeks.map((week) => ({ value: week, label: weekLabel(week) }));
 
     // ---- Kerncijfers ----
-    $: totalMilk = sum(filtered.map((r) => r.liters));
-    // Aantal unieke (koe, dag)-combinaties: hiermee wordt de melkfrequentie
-    // per koe per dag berekend, ongeacht hoeveel dagen data er zijn.
-    $: cowDayCount = new Set(filtered.map((r) => `${r.animal_number}|${r.dayKey}`)).size;
     $: statCards = [
-        { label: 'Aantal melkingen', value: fmt(filtered.length, 0), sub: `${filteredCowCount} koeien` },
-        { label: 'Totale melk (L)', value: fmt(totalMilk, 0), sub: 'cumulatieve opbrengst' },
+        {
+            label: 'Aantal melkingen',
+            value: fmt(stats.totals.count, 0),
+            sub: `${stats.totals.cowCount} koeien`
+        },
+        {
+            label: 'Totale melk (L)',
+            value: fmt(stats.totals.totalLiters, 0),
+            sub: 'cumulatieve opbrengst'
+        },
         {
             label: 'Gem. melk per melking (L)',
-            value: fmt(filtered.length ? totalMilk / filtered.length : null, 2),
+            value: fmt(stats.totals.avgPerMilking, 2),
             sub: 'efficiëntie per melkbeurt'
         },
         {
             label: 'Gem. melkingen per koe per dag',
-            value: fmt(cowDayCount ? filtered.length / cowDayCount : null, 2),
+            value: fmt(stats.totals.milkingsPerCowDay, 2),
             sub: 'frequentie per dier per dag'
         },
         {
             label: 'Gem. tijd tussen melkingen (uur)',
-            value: fmt(avgInterval, 1),
-            sub: `gaten > ${MAX_INTERVAL_HOURS}u niet meegeteld`
+            value: fmt(stats.totals.avgIntervalHours, 1),
+            sub: `gaten > ${stats.intervals.maxHours}u niet meegeteld`
         }
     ];
 
-    // ---- Heatmaps (uur x dag) ----
-    $: ({ countMatrix, avgLiters } = buildHeatmaps(filtered));
-
-    // ---- Uur- en dagstatistieken ----
+    // ---- Grafiekdata (alleen vormgeving; cijfers komen van de server) ----
     const HOUR_LABELS = Array.from({ length: 24 }, (_, h) => `${h}:00`);
-
-    function groupByHour(list) {
-        const count = Array(24).fill(0);
-        const liters = Array(24).fill(0);
-        for (const r of list) {
-            count[r.hour] += 1;
-            liters[r.hour] += r.liters ?? 0;
-        }
-        return { count, liters };
-    }
-
-    $: hourly = groupByHour(filtered);
 
     $: hourChartData = {
         labels: HOUR_LABELS,
@@ -191,14 +218,14 @@
             {
                 type: 'bar',
                 label: 'Aantal melkingen',
-                data: hourly.count,
+                data: stats.hourly.count,
                 backgroundColor: 'rgba(46, 139, 87, 0.55)',
                 yAxisID: 'y'
             },
             {
                 type: 'line',
                 label: 'Gem. melk per melking (L)',
-                data: hourly.count.map((c, h) => (c ? hourly.liters[h] / c : null)),
+                data: stats.hourly.avgPerMilking,
                 borderColor: '#1d4ed8',
                 backgroundColor: '#1d4ed8',
                 pointRadius: 2,
@@ -208,30 +235,20 @@
         ]
     };
 
-    $: dayGroups = (() => {
-        const count = Array(7).fill(0);
-        const liters = Array(7).fill(0);
-        for (const r of filtered) {
-            count[r.dayIdx] += 1;
-            liters[r.dayIdx] += r.liters ?? 0;
-        }
-        return { count, liters };
-    })();
-
     $: dayChartData = {
         labels: DAY_LABELS,
         datasets: [
             {
                 type: 'bar',
                 label: 'Aantal melkingen',
-                data: dayGroups.count,
+                data: stats.weekday.count,
                 backgroundColor: 'rgba(46, 139, 87, 0.55)',
                 yAxisID: 'y'
             },
             {
                 type: 'line',
                 label: 'Totale melk (L)',
-                data: dayGroups.liters,
+                data: stats.weekday.totalLiters,
                 borderColor: '#1d4ed8',
                 backgroundColor: '#1d4ed8',
                 pointRadius: 3,
@@ -241,26 +258,20 @@
         ]
     };
 
-    // ---- Totale productie per uur + cumulatief dagverloop ----
-    $: cumulative = hourly.liters.reduce((acc, v) => {
-        acc.push((acc.length ? acc[acc.length - 1] : 0) + v);
-        return acc;
-    }, []);
-
     $: productionChartData = {
         labels: HOUR_LABELS,
         datasets: [
             {
                 type: 'bar',
                 label: 'Totale melk per uur (L)',
-                data: hourly.liters,
+                data: stats.hourly.totalLiters,
                 backgroundColor: 'rgba(29, 78, 216, 0.5)',
                 yAxisID: 'y'
             },
             {
                 type: 'line',
                 label: 'Cumulatief dagverloop (L)',
-                data: cumulative,
+                data: stats.hourly.cumulative,
                 borderColor: '#e69500',
                 backgroundColor: '#e69500',
                 pointRadius: 0,
@@ -270,81 +281,37 @@
         ]
     };
 
-    // ---- Verdeling tijd tussen melkingen ----
-    const BIN_SIZE = 2;
-    $: intervalBins = (() => {
-        const bins = Array(MAX_INTERVAL_HOURS / BIN_SIZE).fill(0);
-        for (const { hours } of intervals) {
-            const idx = Math.min(bins.length - 1, Math.floor(hours / BIN_SIZE));
-            bins[idx] += 1;
-        }
-        return bins;
-    })();
-
     $: intervalDistData = {
-        labels: intervalBins.map((_, i) => `${i * BIN_SIZE}–${(i + 1) * BIN_SIZE}u`),
+        labels: stats.intervals.bins.map(
+            (_, i) => `${i * stats.intervals.binHours}–${(i + 1) * stats.intervals.binHours}u`
+        ),
         datasets: [
             {
                 label: 'Aantal intervallen',
-                data: intervalBins,
+                data: stats.intervals.bins,
                 backgroundColor: 'rgba(46, 139, 87, 0.55)'
             }
         ]
     };
 
-    // ---- Ranglijst: gem. interval per koe ----
-    $: intervalPerCow = (() => {
-        const byCow = new Map();
-        for (const { animal, hours } of intervals) {
-            if (!byCow.has(animal)) {
-                byCow.set(animal, []);
-            }
-            byCow.get(animal).push(hours);
-        }
-        return [...byCow.entries()]
-            .map(([animal, list]) => ({ animal, avg: mean(list), n: list.length }))
-            .filter((e) => e.n >= 2)
-            .sort((a, b) => b.avg - a.avg)
-            .slice(0, 15);
-    })();
-
     $: intervalRankData = {
-        labels: intervalPerCow.map((e) => `Koe ${e.animal}`),
+        labels: stats.intervals.perCowTop.map((e) => `Koe ${e.animal}`),
         datasets: [
             {
                 label: 'Gem. tijd tussen melkingen (uur)',
-                data: intervalPerCow.map((e) => e.avg),
+                data: stats.intervals.perCowTop.map((e) => e.avg),
                 backgroundColor: 'rgba(192, 57, 43, 0.55)'
             }
         ]
     };
 
-    // ---- Trend per dag ----
-    $: dailyTrend = (() => {
-        const byDay = new Map();
-        for (const r of filtered) {
-            if (!byDay.has(r.dayKey)) {
-                byDay.set(r.dayKey, { liters: 0, count: 0 });
-            }
-            const entry = byDay.get(r.dayKey);
-            entry.liters += r.liters ?? 0;
-            entry.count += 1;
-        }
-        const days = [...byDay.keys()].sort();
-        return {
-            labels: days,
-            liters: days.map((d) => byDay.get(d).liters),
-            counts: days.map((d) => byDay.get(d).count)
-        };
-    })();
-
     $: trendChartData = {
-        labels: dailyTrend.labels,
+        labels: stats.dailyTrend.labels,
         datasets: [
             {
                 type: 'line',
                 label: 'Totale melk per dag (L)',
-                data: dailyTrend.liters,
+                data: stats.dailyTrend.liters,
                 borderColor: '#2e8b57',
                 backgroundColor: 'rgba(46, 139, 87, 0.15)',
                 fill: true,
@@ -355,7 +322,7 @@
             {
                 type: 'line',
                 label: 'Aantal melkingen per dag',
-                data: dailyTrend.counts,
+                data: stats.dailyTrend.counts,
                 borderColor: '#1d4ed8',
                 backgroundColor: '#1d4ed8',
                 pointRadius: 1,
@@ -365,64 +332,33 @@
         ]
     };
 
-    // ---- Statusverdeling ----
-    $: statusCounts = (() => {
-        const counts = new Map();
-        for (const r of filtered) {
-            counts.set(r.status, (counts.get(r.status) ?? 0) + 1);
-        }
-        return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-    })();
-
     $: statusChartData = {
-        labels: statusCounts.map(([status]) => statusStyle(status).label),
+        labels: stats.status.map(({ status }) => statusStyle(status).label),
         datasets: [
             {
-                data: statusCounts.map(([, count]) => count),
-                backgroundColor: statusCounts.map(([status]) => statusStyle(status).color)
+                data: stats.status.map(({ count }) => count),
+                backgroundColor: stats.status.map(({ status }) => statusStyle(status).color)
             }
         ]
     };
 
-    // ---- Weekvergelijking ----
-    $: weekComparison = (() => {
-        const byWeek = new Map();
-        for (const r of filtered) {
-            if (!byWeek.has(r.weekKey)) {
-                byWeek.set(r.weekKey, { liters: 0, count: 0 });
-            }
-            const entry = byWeek.get(r.weekKey);
-            entry.liters += r.liters ?? 0;
-            entry.count += 1;
-        }
-        const keys = [...byWeek.keys()].sort();
-        return {
-            labels: keys,
-            liters: keys.map((k) => byWeek.get(k).liters),
-            counts: keys.map((k) => byWeek.get(k).count)
-        };
-    })();
-
     $: weekChartData = {
-        labels: weekComparison.labels,
+        labels: stats.weekly.labels,
         datasets: [
             {
                 label: 'Aantal melkingen',
-                data: weekComparison.counts,
+                data: stats.weekly.counts,
                 backgroundColor: 'rgba(46, 139, 87, 0.55)',
                 yAxisID: 'y'
             },
             {
                 label: 'Totale melk (L)',
-                data: weekComparison.liters,
+                data: stats.weekly.liters,
                 backgroundColor: 'rgba(29, 78, 216, 0.5)',
                 yAxisID: 'y1'
             }
         ]
     };
-
-    // ---- Recente melkingen ----
-    $: recentRows = [...filtered].reverse().slice(0, 30);
 
     // ---- Chartopties ----
     const baseOptions = {
@@ -491,6 +427,11 @@
                     · gecontroleerd: {clockLabel(lastChecked)}
                 {/if}
             </span>
+            {#if progress && progress.complete === false}
+                <span class="progress">
+                    eVault laden: {fmt(progress.loaded ?? 0, 0)} records binnen…
+                </span>
+            {/if}
             {#if loadError}
                 <span class="error">{loadError}</span>
             {/if}
@@ -529,7 +470,7 @@
         <div class="filter-group filter-footer">
             <button type="button" class="reset" on:click={resetFilters}>Alle filters wissen</button>
             <p class="filter-info">
-                {fmt(filtered.length, 0)} van {fmt(enriched.length, 0)} melkingen geselecteerd
+                {fmt(stats.filtered.count, 0)} van {fmt(stats.filtered.of, 0)} melkingen geselecteerd
             </p>
         </div>
     </section>
@@ -538,11 +479,11 @@
         <div class="charts">
             <div class="card wide">
                 <h3>Heatmap: aantal melkingen per uur en dag</h3>
-                <Heatmap matrix={countMatrix} unit="melkingen" decimals={0} />
+                <Heatmap matrix={stats.heatmaps.count} unit="melkingen" decimals={0} />
             </div>
             <div class="card wide">
                 <h3>Heatmap: gemiddelde melk (L) per uur en dag</h3>
-                <Heatmap matrix={avgLiters} unit="L" decimals={1} />
+                <Heatmap matrix={stats.heatmaps.avgLiters} unit="L" decimals={1} />
             </div>
 
             <div class="card">
@@ -619,7 +560,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {#each recentRows as record (record.id)}
+                            {#each stats.recent as record (record.id)}
                                 <tr>
                                     <td>{record.timestamp.replace('T', ' ')}</td>
                                     <td>{record.animal_number}</td>
@@ -628,8 +569,8 @@
                                         {statusStyle(record.status).label}
                                     </td>
                                     <td>
-                                        {intervalByRecord.has(record.id)
-                                            ? `${fmt(intervalByRecord.get(record.id), 1)} uur`
+                                        {record.intervalHours != null
+                                            ? `${fmt(record.intervalHours, 1)} uur`
                                             : '–'}
                                     </td>
                                 </tr>
@@ -709,6 +650,12 @@
     .updated {
         font-size: 0.8rem;
         color: #6b7280;
+    }
+
+    .progress {
+        font-size: 0.8rem;
+        color: #b45309;
+        font-weight: 600;
     }
 
     h3 {

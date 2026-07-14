@@ -1,5 +1,5 @@
 <script>
-    import { DAY_LABELS, fmt } from '$lib/stats.js';
+    import { DAY_LABELS, fmt } from '$lib/format.js';
 
     export let matrix; // 7 rijen (Ma..Zo) x 24 kolommen (0..23), null = geen data
     export let unit = '';

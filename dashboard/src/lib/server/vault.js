@@ -173,15 +173,27 @@ async function graphql(vault, query, variables) {
 }
 
 function schemaFor(vault, basePath) {
+    // Zonder expliciete mapping is de collectienaam zelf de ontology-id (een
+    // vaste string werkt — store en fetch moeten hem alleen eens zijn). Een in
+    // de Ontology service geregistreerde W3ID mappen onder vault.schema_ids is
+    // pas nodig voor interoperabiliteit met andere W3DS-platforms.
     const logical = basePath.split('/', 1)[0];
-    const schemaId = vault.schema_ids?.[logical];
-    if (!schemaId) {
-        throw new Error(
-            `No schema id configured for '${logical}'. Register the JSON Schema in the ` +
-                'Ontology service and add its W3ID under vault.schema_ids in settings.json.'
-        );
+    return vault.schema_ids?.[logical] ?? logical;
+}
+
+// Laadstatus van een collectie, voor voortgangsweergave in de UI terwijl de
+// achtergrond-fetch nog door de eVault-pagina's loopt.
+export function collectionStatus(settings, basePath) {
+    if (settings.vault?.mode !== 'evault') {
+        return { complete: true, loaded: null, refreshing: false, fetchedAt: null };
     }
-    return schemaId;
+    const entry = recordCache.get(basePath);
+    return {
+        complete: entry?.complete ?? false,
+        loaded: entry ? entry.records.length : 0,
+        refreshing: refreshing.has(basePath),
+        fetchedAt: entry?.fetchedAt ?? null
+    };
 }
 
 // Returns immediately with whatever is cached (possibly a partial first load or
