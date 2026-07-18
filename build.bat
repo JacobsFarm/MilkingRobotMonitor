@@ -13,7 +13,7 @@ if not exist uploader\config\settings.json copy uploader\config\settings.example
 
 echo.
 echo === Building uploader.exe ===
-pyinstaller --onefile --name uploader --paths uploader ^
+pyinstaller --onefile --name uploader --paths uploader --paths . ^
     --distpath dist\uploader --workpath build\uploader --specpath build ^
     uploader\run.py
 xcopy /e /i /y uploader\config dist\uploader\config

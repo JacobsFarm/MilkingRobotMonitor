@@ -6,6 +6,18 @@
             "collection": "milking_controle_data",
             "data_directory": "../data",
             "file_pattern": "*.txt"
+        },
+        {
+            "type": "feed_distribution",
+            "collection": "feed_distribution_data",
+            "data_directory": "../data",
+            "file_pattern": "Voerdistributie-rapport*.csv"
+        },
+        {
+            "type": "production_report",
+            "collection": "milking_production_data",
+            "data_directory": "../data",
+            "file_pattern": "Productie-rapport*.csv"
         }
     ],
     "vault": {
@@ -15,7 +27,9 @@
         "w3id": "@your-farm-ename",
         "platform": "melkmonitor-uploader",
         "schema_ids": {
-            "milking_controle_data": "milking_controle_data"
+            "milking_controle_data": "milking_controle_data",
+            "feed_distribution_data": "feed_distribution_data",
+            "milking_production_data": "milking_production_data"
         }
     }
 }

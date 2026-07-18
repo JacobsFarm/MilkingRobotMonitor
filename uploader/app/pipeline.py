@@ -5,7 +5,7 @@ import time
 from app.config import STATE_DIRECTORY, load_settings
 from app.sources import create_source
 from app.state import SyncState
-from app.vault_client import create_vault_client
+from core.vault_client import create_vault_client
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("uploader")

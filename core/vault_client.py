@@ -8,7 +8,7 @@ import urllib.request
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-logger = logging.getLogger("uploader.vault")
+logger = logging.getLogger("melkmonitor.vault")
 
 
 class VaultClient(ABC):
@@ -31,6 +31,15 @@ class VaultClient(ABC):
     @abstractmethod
     def fetch_all(self, prefix):
         raise NotImplementedError
+
+    def count(self, prefix):
+        """How many records the collection holds.
+
+        Backends where this is cheaper than fetching everything (the real
+        eVault answers it in one request) override this: it lets callers skip a
+        minutes-long full read when nothing has changed.
+        """
+        return len(self.fetch_all(prefix))
 
     @abstractmethod
     def subscribe(self, prefix, callback, interval_seconds=5):
@@ -155,6 +164,12 @@ class MetaStateEVaultClient(VaultClient):
         }
     """
 
+    COUNT_QUERY = """
+        query CountMetaEnvelopes($filter: MetaEnvelopeFilterInput) {
+            metaEnvelopes(filter: $filter, first: 1) { totalCount }
+        }
+    """
+
     def __init__(self, registry_url, w3id, platform, schema_ids):
         self.registry_url = registry_url.rstrip("/")
         self.w3id = w3id
@@ -180,7 +195,20 @@ class MetaStateEVaultClient(VaultClient):
         if self._endpoint:
             return self._endpoint
         url = f"{self.registry_url}/resolve?w3id={urllib.parse.quote(self.w3id)}"
-        body = self._http_json(url)
+        try:
+            body = self._http_json(url)
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                # By far the most common setup mistake: settings.json still
+                # holds the template placeholder, or a mistyped eName.
+                raise RuntimeError(
+                    f"The registry does not know w3id '{self.w3id}' (404).\n"
+                    "Check vault.w3id in config/settings.json: it must be your "
+                    "farm's own eName in the form '@<uuid>' from the eID Wallet "
+                    "-- not the '@your-farm-ename' placeholder from "
+                    "settings.example.json."
+                ) from error
+            raise
         # Resolve response: {"ename", "uri", "evault", ...}; "uri" is the eVault
         # origin (e.g. "http://host:4000"). "evault" is an id, not a URL.
         uri = body.get("uri")
@@ -300,6 +328,19 @@ class MetaStateEVaultClient(VaultClient):
                     on_stored(chunk)
                 done += len(chunk)
                 logger.info("eVault upload progress: %d/%d records", done, total)
+
+    def count(self, prefix):
+        """Record count in one request, via the connection's totalCount.
+
+        There is no way to fetch *only* new records: the filter has no date
+        field, and results are ordered by the envelope's content-derived UUID,
+        so new records scatter throughout the ordering rather than landing at
+        the end (verified against production -- resuming from a stored cursor
+        would silently skip them). Comparing counts is therefore the cheap way
+        to know whether a full re-read is needed at all.
+        """
+        data = self._graphql(self.COUNT_QUERY, {"filter": {"ontologyId": self._schema_for(prefix)}})
+        return data["metaEnvelopes"]["totalCount"]
 
     def fetch_all(self, prefix):
         schema_id = self._schema_for(prefix)

@@ -36,6 +36,61 @@ class MilkingRobotSource(DataSource):
     KNOWN_STATUSES = ("OK", "!", "#")
     ANIMAL_NUMBER_DIGITS = 4
 
+    path_pattern = "{collection}/{animal_number}/{id}"
+
+    record_schema = {
+        "schema_version": {
+            "type": "integer",
+            "description": "Bumped when this record's shape changes.",
+            "example": SCHEMA_VERSION,
+        },
+        "id": {
+            "type": "string",
+            "description": "Unique within the collection; used for dedup on upload.",
+            "format": "{animal_number}_{timestamp:%Y-%m-%dT%H-%M-%S}",
+            "example": "5256_2025-10-16T16-45-14",
+        },
+        "animal_number": {
+            "type": "integer",
+            "description": "4-digit animal tag number (records with any other length are dropped).",
+            "example": 5256,
+        },
+        "registration_number": {
+            "type": "string",
+            "description": "Official (KI/NRS-style) registration number of the animal.",
+            "example": "NL 660752569",
+        },
+        "timestamp": {
+            "type": "string",
+            "description": "Milking timestamp, ISO 8601, farm-local time (no timezone offset stored).",
+            "example": "2025-10-16T16:45:14",
+        },
+        "status": {
+            "type": "string",
+            "description": "Milking outcome, normalized from the robot's endOfMilkingStatus.",
+            "enum": {
+                "OK": "successful milking",
+                "!": "milking not fully completed / robot-reported issue",
+                "#": "unknown or other status (fallback for anything unrecognized)",
+            },
+            "example": "OK",
+        },
+        "yield_raw": {
+            "type": "number",
+            "description": (
+                "Yield exactly as the robot reported it — NOT liters. Convert at "
+                "display time: liters = yield_raw / yield_divisor "
+                "(yield_divisor defaults to 1000, see dashboard settings)."
+            ),
+            "example": 13430,
+        },
+        "source": {
+            "type": "string",
+            "description": "Constant identifying which DataSource produced this record.",
+            "example": SOURCE,
+        },
+    }
+
     def parse(self):
         directory = Path(self.config["data_directory"])
         pattern = self.config.get("file_pattern", "*.txt")

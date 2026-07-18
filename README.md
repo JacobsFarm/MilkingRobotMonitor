@@ -7,20 +7,22 @@ A modular system for managing milking control data, using a MetaState eVault as 
    raw files ───▶│  Uploader  │ ─────▶ │    eVault     │ ─────▶ │  Dashboards   │
    (data/)       │  (writer)  │  store │ (data store)  │  read  │ (web/desktop) │
                  └────────────┘        └──────┬───────┘  live   └───────────────┘
-                                              │
-                                              ▼  reads raw data, writes insights back
+                                              │  ▲
+                        reads milking data    ▼  │  writes milking_insights
                                         ┌───────────┐
-                                        │  AI layer │  (planned)
+                                        │   Agent   │  local LLM (Ollama)
                                         └───────────┘
 ```
 
 ## Components
 
-- **[uploader/](uploader/)** — Python program that reads raw milking control files, cleans them, and writes JSON records to the eVault path `milking_controle_data/[animalNumber]/[unique_id]`. The yield stays **raw** (`yield_raw`) so the stored data remains machine-readable for the AI layer; the dashboard converts to liters at display time.
-- **[dashboard/](dashboard/)** — SvelteKit web dashboard, made to run on a Raspberry Pi and be viewed from any browser (phone, tablet, laptop). Prepared for the `milking_insights` AI path, and can later be packaged as a native desktop/mobile app (Tauri/Capacitor) from the same codebase.
-- **[data/](data/)** — folder where the raw milking control files (FULLSENSE format) go. The files themselves are private and gitignored; only a placeholder README is committed.
+- **[uploader/](uploader/)** — Python program that reads raw input files, normalizes them, and writes JSON records to the eVault. Three data sources today: milking control files (`milking_controle_data`), feed distribution per milking (`feed_distribution_data`) and daily production snapshots (`milking_production_data`). Values stay **raw**; readers interpret at display time. Extensible: each kind of input is a `DataSource`.
+- **[dashboard/](dashboard/)** — SvelteKit web dashboard, made to run on a Raspberry Pi and be viewed from any browser (phone, tablet, laptop). All statistics are computed server-side — including the cross-dataset joins (feed × milk efficiency, leftover-feed signals, milking speed vs production); the browser only draws them.
+- **[agent/](agent/)** — AI post-platform. Reads the milking, feed and production data, works out what stands out **in Python**, and has a local language model (Ollama) put it into words. Writes the result back as `milking_insights`, which the dashboard reads. The model never sees raw records and never computes numbers — so every insight keeps the figures it was based on.
+- **[core/](core/)** — shared building blocks for the Python programs; today the eVault transport (rate limiting, retries, pagination), written and verified once instead of duplicated.
+- **[data/](data/)** — folder where the raw milking control files (FULLSENSE format) go. Private and gitignored; only a placeholder README is committed.
 
-Each program is self-contained: the uploader runs on the farm PC, a dashboard runs wherever you want to look. They share nothing but the eVault. A future AI layer joins the same way: it subscribes to `milking_controle_data`, computes insights (anomaly detection, yield prediction), and writes them back to the vault under `milking_insights` — no changes to the other programs needed.
+Each program is self-contained and runs wherever you want: the uploader on the farm PC, the dashboard on a Pi, the agent on whatever machine has the GPU. **They share nothing but the eVault** — there is no direct API between them. Adding a fourth program works the same way: read the collections you need, write your own, and nothing else has to change.
 
 ## eVault modes
 
@@ -104,9 +106,11 @@ The executable reads its settings from the `config/` folder beside it; the defau
 
 The dashboard is deployed differently because it is a web app: it runs as a server (see [dashboard/README.md](dashboard/README.md)) on a Raspberry Pi or any machine, and the same codebase can later be packaged as a native desktop app with Tauri or a mobile app with Capacitor.
 
-## Data format (machine-readable, AI-ready)
+## What's in the vault — [VAULT_SCHEMA.json](VAULT_SCHEMA.json)
 
-Every record in the vault is versioned and keeps the source values raw:
+Every collection the eVault holds — its path pattern, field names, types, and how to query it — is documented in **[`VAULT_SCHEMA.json`](VAULT_SCHEMA.json)**. It's *generated*, not hand-written (`uploader/generate_vault_schema.py`, from each data source's declared `record_schema`), so unlike prose docs it can't silently drift from what the uploader actually writes. Read it before building a new dashboard view or agent that needs to combine fields — no guessing which collection has what.
+
+Every record is versioned and keeps source values **raw** — interpretation (liters = `yield_raw / yield_divisor`, aggregates, insights) happens in the readers, never in the stored data. That's what keeps the vault a clean, stable source as more data sources and readers (dashboards, an AI layer) get added. Today's `milking_controle_data` shape, for a feel of it:
 
 ```json
 {
@@ -120,8 +124,6 @@ Every record in the vault is versioned and keeps the source values raw:
     "source": "milking_robot"
 }
 ```
-
-Interpretation (like liters = `yield_raw / 1000`) happens in the readers, never in the stored data. This keeps the vault a clean training and inference source for the AI layer, and `schema_version` + `source` make it safe to add more data sources later.
 
 ## Notes
 

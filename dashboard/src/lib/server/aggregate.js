@@ -12,10 +12,13 @@
 // recordset (tienduizenden records), en elke berekening gebeurt precies één
 // keer per unieke (dataset, filter)-combinatie dankzij de memo.
 //
-// Uitbreiden met een nieuwe dataset: schrijf naast getMilkingStats een eigen
-// get<Naam>Stats met een eigen buildstap, en geef die een eigen API-route.
-// Koppelen van datasets (bv. gezondheid × melkgift) gebeurt ook hier: beide
-// collecties ophalen en server-side joinen op animal_number + tijd.
+// Koppelen van datasets gebeurt ook hier, server-side: voerdistributie en
+// productie-snapshots worden op animal_number + dag gejoined met de melkingen
+// (zie buildFeedStats/buildProductionStats). De browser ziet alleen de
+// uitkomst. Welke bron leidend is per grootheid staat in VAULT_SCHEMA.json
+// onder field_authority — melksnelheid komt van de robot (authoritatief);
+// lactatiegegevens komen hier óók van de robot totdat CRV (mpr_uitslag) is
+// geüpload, dan wordt die bron hier de eerste keus.
 // ---------------------------------------------------------------------------
 
 import { createHash } from 'node:crypto';
@@ -33,6 +36,8 @@ const MEMO_LIMIT = 40;
 // tussen verversingen, dus een WeakMap geeft automatische invalidatie zodra de
 // cache een nieuwe versie plaatst.
 const datasetCache = new WeakMap();
+const feedCache = new WeakMap();
+const productionCache = new WeakMap();
 // (datasetSignature + filters) -> kant-en-klare stats.
 const statsMemo = new Map();
 
@@ -112,6 +117,186 @@ function datasetOf(records, divisor) {
         datasetCache.set(records, dataset);
     }
     return dataset;
+}
+
+// ---- voerdistributie (feed_distribution_data) ------------------------------
+
+// Verrijkt voerrecords tot rijen met dezelfde filter-sleutels als melkingen
+// (animal_number, dayKey, monthKey, weekKey), zodat applyFilters ze ongewijzigd
+// kan filteren. kg = som van de vier voersoorten / feed_divisor.
+function feedDatasetOf(records, feedDivisor) {
+    let dataset = feedCache.get(records);
+    if (!dataset || dataset.feedDivisor !== feedDivisor) {
+        const rows = [];
+        for (const record of records) {
+            const date = new Date(record.timestamp);
+            if (Number.isNaN(date.getTime())) {
+                continue;
+            }
+            const grams =
+                (record.feed_a_raw ?? 0) +
+                (record.feed_b_raw ?? 0) +
+                (record.feed_c_raw ?? 0) +
+                (record.feed_d_raw ?? 0);
+            rows.push({
+                id: record.id,
+                animal_number: record.animal_number,
+                date,
+                kg: grams / feedDivisor,
+                consumed: record.all_feed_consumed ?? null,
+                dayKey: record.timestamp.slice(0, 10),
+                monthKey: record.timestamp.slice(0, 7),
+                weekKey: isoWeekKey(date)
+            });
+        }
+        rows.sort((a, b) => a.date - b.date);
+        const signature = createHash('sha1')
+            .update(rows.map((r) => r.id).sort().join('|'))
+            .digest('hex');
+        dataset = { rows, signature, feedDivisor };
+        feedCache.set(records, dataset);
+    }
+    return dataset;
+}
+
+// Voer × melk: gejoined op dag (en door de gedeelde filters ook op koe/periode).
+function buildFeedStats(feedRows, milkDaily) {
+    if (!feedRows.length) {
+        return { available: false };
+    }
+    const byDay = new Map();
+    const byCow = new Map();
+    for (const r of feedRows) {
+        if (!byDay.has(r.dayKey)) {
+            byDay.set(r.dayKey, { kg: 0, feedings: 0, notFinished: 0 });
+        }
+        const day = byDay.get(r.dayKey);
+        day.kg += r.kg;
+        day.feedings += 1;
+        if (r.consumed === false) {
+            day.notFinished += 1;
+        }
+        const cowKey = String(r.animal_number);
+        if (!byCow.has(cowKey)) {
+            byCow.set(cowKey, { notFinished: 0, total: 0 });
+        }
+        const cow = byCow.get(cowKey);
+        cow.total += 1;
+        if (r.consumed === false) {
+            cow.notFinished += 1;
+        }
+    }
+
+    // Melkliters per dag uit de al berekende dagtrend van de melkingen.
+    const milkByDay = new Map(milkDaily.labels.map((label, i) => [label, milkDaily.liters[i]]));
+    const labels = [...byDay.keys()].sort();
+    const feedKg = labels.map((d) => byDay.get(d).kg);
+    const milkLiters = labels.map((d) => milkByDay.get(d) ?? null);
+    const efficiency = labels.map((d, i) =>
+        feedKg[i] > 0 && milkLiters[i] != null ? milkLiters[i] / feedKg[i] : null
+    );
+    const leftoverPct = labels.map((d) => {
+        const day = byDay.get(d);
+        return day.feedings ? (day.notFinished / day.feedings) * 100 : null;
+    });
+
+    // Totale efficiëntie alleen over dagen waar beide datasets data hebben.
+    let overlapMilk = 0;
+    let overlapFeed = 0;
+    labels.forEach((d, i) => {
+        if (feedKg[i] > 0 && milkLiters[i] != null) {
+            overlapMilk += milkLiters[i];
+            overlapFeed += feedKg[i];
+        }
+    });
+
+    const topLeftovers = [...byCow.entries()]
+        .filter(([, c]) => c.notFinished > 0)
+        .map(([animal, c]) => ({ animal, notFinished: c.notFinished, total: c.total }))
+        .sort((a, b) => b.notFinished - a.notFinished || b.total - a.total)
+        .slice(0, 10);
+
+    return {
+        available: true,
+        filtered: { count: feedRows.length },
+        totals: {
+            totalKg: sum(feedKg),
+            litersPerKg: overlapFeed > 0 ? overlapMilk / overlapFeed : null,
+            overlapDays: labels.filter((d, i) => feedKg[i] > 0 && milkLiters[i] != null).length
+        },
+        dailyTrend: { labels, feedKg, milkLiters, efficiency, leftoverPct },
+        leftovers: { topCows: topLeftovers }
+    };
+}
+
+// ---- productie-snapshots (milking_production_data) -------------------------
+
+function productionDatasetOf(records) {
+    let dataset = productionCache.get(records);
+    if (!dataset) {
+        const rows = [];
+        for (const record of records) {
+            if (typeof record.report_date !== 'string') {
+                continue;
+            }
+            const date = new Date(record.report_date);
+            if (Number.isNaN(date.getTime())) {
+                continue;
+            }
+            rows.push({
+                id: record.id,
+                animal_number: record.animal_number,
+                dayKey: record.report_date,
+                monthKey: record.report_date.slice(0, 7),
+                weekKey: isoWeekKey(date),
+                speed: record.average_milking_speed_kg_min ?? null,
+                milk24: record.milk_24h_kg ?? null,
+                milk10dAvg: record.milk_10d_avg_kg ?? null,
+                lactationDays: record.lactation_days ?? null,
+                lactationNumber: record.lactation_number ?? null
+            });
+        }
+        rows.sort((a, b) => (a.dayKey < b.dayKey ? -1 : 1));
+        const signature = createHash('sha1')
+            .update(rows.map((r) => r.id).sort().join('|'))
+            .digest('hex');
+        dataset = { rows, signature };
+        productionCache.set(records, dataset);
+    }
+    return dataset;
+}
+
+function buildProductionStats(productionRows) {
+    if (!productionRows.length) {
+        return { available: false };
+    }
+    const reportDates = [...new Set(productionRows.map((r) => r.dayKey))].sort();
+    const latestDate = reportDates[reportDates.length - 1];
+    const latest = productionRows.filter((r) => r.dayKey === latestDate);
+
+    // Scatterpunten van het nieuwste rapport. Melksnelheid is hier de
+    // authoritative bron (de robot meet dit zelf, zie field_authority);
+    // lactation_days is de robot-registratie en wordt later vervangen door CRV.
+    const points = latest.map((r) => ({
+        animal: String(r.animal_number),
+        speed: r.speed,
+        milk24: r.milk24,
+        lactationDays: r.lactationDays,
+        lactationNumber: r.lactationNumber
+    }));
+
+    return {
+        available: true,
+        filtered: { count: productionRows.length },
+        reportDates,
+        latestDate,
+        latest: {
+            cowCount: latest.length,
+            avgSpeed: mean(latest.map((r) => r.speed).filter((v) => v != null)),
+            avgMilk24: mean(latest.map((r) => r.milk24).filter((v) => v != null))
+        },
+        points
+    };
 }
 
 // ---- filters ----------------------------------------------------------------
@@ -311,21 +496,37 @@ function buildMilkingStats(dataset, filters) {
 
 export async function getMilkingStats(settings, filters) {
     const basePath = settings.base_path ?? 'milking_controle_data';
-    const records = await fetchAll(settings, basePath);
-    const dataset = datasetOf(records, settings.yield_divisor ?? 1000);
+    const feedPath = settings.feed_path ?? 'feed_distribution_data';
+    const productionPath = settings.production_path ?? 'milking_production_data';
 
-    // De signature dekt dataset én filters: zelfde signature = gegarandeerd
-    // zelfde statistieken, dus de client kan met `sig` een lege "unchanged"
-    // respons krijgen in plaats van dezelfde cijfers opnieuw.
+    const [records, feedRecords, productionRecords] = await Promise.all([
+        fetchAll(settings, basePath),
+        fetchAll(settings, feedPath),
+        fetchAll(settings, productionPath)
+    ]);
+    const dataset = datasetOf(records, settings.yield_divisor ?? 1000);
+    const feedDataset = feedDatasetOf(feedRecords, settings.feed_divisor ?? 1000);
+    const productionDataset = productionDatasetOf(productionRecords);
+
+    // De signature dekt álle datasets én de filters: zelfde signature =
+    // gegarandeerd dezelfde statistieken, dus de client kan met `sig` een lege
+    // "unchanged" respons krijgen in plaats van dezelfde cijfers opnieuw.
     const filterKey = filterKeyOf(filters);
     const signature = createHash('sha1')
-        .update(`${dataset.signature}|${filterKey}`)
+        .update(
+            `${dataset.signature}|${feedDataset.signature}|${productionDataset.signature}|${filterKey}`
+        )
         .digest('hex');
 
     let stats = statsMemo.get(signature);
     if (!stats) {
         stats = buildMilkingStats(dataset, filters);
         stats.options = dataset.options;
+        // Dezelfde filters gelden voor alle datasets: de voer- en
+        // productiecijfers slaan dus op precies dezelfde koeien en periode als
+        // de melkgrafieken ernaast.
+        stats.feed = buildFeedStats(applyFilters(feedDataset.rows, filters), stats.dailyTrend);
+        stats.production = buildProductionStats(applyFilters(productionDataset.rows, filters));
         statsMemo.set(signature, stats);
         while (statsMemo.size > MEMO_LIMIT) {
             statsMemo.delete(statsMemo.keys().next().value);

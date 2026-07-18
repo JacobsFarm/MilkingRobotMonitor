@@ -1,0 +1,368 @@
+{
+  "$generated_by": "generate_vault_schema.py -- do not hand-edit, regenerate instead",
+  "$generated_at": "2026-07-18T16:24:01.144121+00:00",
+  "vault_path_pattern": "{collection}/{subject}/{record_id}",
+  "note": "Every collection's ontology id is a plain stable string by default (the collection name itself) -- no Ontology-service registration required for store/fetch to work. See vault.schema_ids in a program's config/settings.json to map a collection to a registered Ontology W3ID instead, which is only needed for cross-platform interop.",
+  "field_authority": {
+    "note": "Which source READERS should prefer when multiple collections report the same quantity. Walk each list in order and take the first collection that has a value for the animal/date at hand. Writers never merge or overwrite: every source keeps its own records, provenance stays intact, and promoting a better source later (e.g. CRV) is an edit to this table -- no re-upload, no data loss.",
+    "fields": {
+      "lactation_days": [
+        {
+          "collection": "mpr_uitslag",
+          "status": "planned",
+          "note": "CRV registration -- leading as soon as it is uploaded"
+        },
+        {
+          "collection": "milking_production_data",
+          "field": "lactation_days",
+          "status": "active",
+          "note": "robot's own registration; less reliable, fallback only"
+        }
+      ],
+      "lactation_number": [
+        {
+          "collection": "mpr_uitslag",
+          "status": "planned",
+          "note": "CRV registration -- leading as soon as it is uploaded"
+        },
+        {
+          "collection": "milking_production_data",
+          "field": "lactation_number",
+          "status": "active",
+          "note": "robot's own registration; less reliable, fallback only"
+        }
+      ],
+      "milking_speed": [
+        {
+          "collection": "milking_production_data",
+          "field": "average_milking_speed_kg_min",
+          "status": "active",
+          "note": "the robot measures this itself -- authoritative, CRV has no equivalent"
+        }
+      ],
+      "cell_count": [
+        {
+          "collection": "mpr_uitslag",
+          "status": "planned",
+          "note": "only CRV measures cell count"
+        }
+      ]
+    }
+  },
+  "collections": {
+    "milking_controle_data": {
+      "status": "active",
+      "written_by": "uploader (source type: milking_robot)",
+      "read_by": [
+        "dashboard (/api/records, /api/stats)",
+        "agent (analyses it, writes milking_insights)"
+      ],
+      "ontology_id": "milking_controle_data",
+      "vault_path_pattern": "{collection}/{animal_number}/{id}",
+      "vault_path_example": "milking_controle_data/5256/5256_2025-10-16T16-45-14",
+      "fields": {
+        "schema_version": {
+          "type": "integer",
+          "description": "Bumped when this record's shape changes.",
+          "example": 1
+        },
+        "id": {
+          "type": "string",
+          "description": "Unique within the collection; used for dedup on upload.",
+          "format": "{animal_number}_{timestamp:%Y-%m-%dT%H-%M-%S}",
+          "example": "5256_2025-10-16T16-45-14"
+        },
+        "animal_number": {
+          "type": "integer",
+          "description": "4-digit animal tag number (records with any other length are dropped).",
+          "example": 5256
+        },
+        "registration_number": {
+          "type": "string",
+          "description": "Official (KI/NRS-style) registration number of the animal.",
+          "example": "NL 660752569"
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Milking timestamp, ISO 8601, farm-local time (no timezone offset stored).",
+          "example": "2025-10-16T16:45:14"
+        },
+        "status": {
+          "type": "string",
+          "description": "Milking outcome, normalized from the robot's endOfMilkingStatus.",
+          "enum": {
+            "OK": "successful milking",
+            "!": "milking not fully completed / robot-reported issue",
+            "#": "unknown or other status (fallback for anything unrecognized)"
+          },
+          "example": "OK"
+        },
+        "yield_raw": {
+          "type": "number",
+          "description": "Yield exactly as the robot reported it \u2014 NOT liters. Convert at display time: liters = yield_raw / yield_divisor (yield_divisor defaults to 1000, see dashboard settings).",
+          "example": 13430
+        },
+        "source": {
+          "type": "string",
+          "description": "Constant identifying which DataSource produced this record.",
+          "example": "milking_robot"
+        }
+      },
+      "how_to_query": {
+        "python": "vault.fetch_all('milking_controle_data')",
+        "dashboard_js": "fetchAll(settings, 'milking_controle_data')",
+        "graphql": "metaEnvelopes(filter: { ontologyId: \"milking_controle_data\" }, first: 100, after: $cursor) { edges { node { parsed } } pageInfo { hasNextPage endCursor } }"
+      }
+    },
+    "feed_distribution_data": {
+      "status": "active",
+      "written_by": "uploader (source type: feed_distribution)",
+      "read_by": [
+        "dashboard (/api/stats: feed x milk join, efficiency, leftovers)",
+        "agent (cow_feed_left, herd_feed_efficiency_change findings)"
+      ],
+      "ontology_id": "feed_distribution_data",
+      "vault_path_pattern": "{collection}/{animal_number}/{id}",
+      "vault_path_example": "feed_distribution_data/5606/5606_2026-07-05T22-18",
+      "fields": {
+        "schema_version": {
+          "type": "integer",
+          "description": "Bumped when this record's shape changes.",
+          "example": 1
+        },
+        "id": {
+          "type": "string",
+          "description": "Unique within the collection; used for dedup on upload.",
+          "format": "{animal_number}_{timestamp:%Y-%m-%dT%H-%M}",
+          "example": "5606_2026-07-05T22-18"
+        },
+        "animal_number": {
+          "type": "integer",
+          "description": "4-digit animal tag number (same numbering as milking_controle_data).",
+          "example": 5606
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Start of the milking visit this feeding belongs to (ISO 8601, farm-local). Join key to milking_controle_data records of the same animal and visit.",
+          "example": "2026-07-05T22:18:00"
+        },
+        "all_feed_consumed": {
+          "type": "boolean",
+          "description": "Whether the cow finished the dispensed feed (robot's Ja/Nee column); null when the export holds anything else.",
+          "example": true
+        },
+        "feed_a_raw": {
+          "type": "number",
+          "description": "Amount of feed type A exactly as the robot reported it (robot-configured unit, typically grams). Interpretation is the reader's job, like yield_raw.",
+          "example": 1800
+        },
+        "feed_b_raw": {
+          "type": "number",
+          "description": "Amount of feed type B, as reported.",
+          "example": 40
+        },
+        "feed_c_raw": {
+          "type": "number",
+          "description": "Amount of feed type C, as reported.",
+          "example": 0
+        },
+        "feed_d_raw": {
+          "type": "number",
+          "description": "Amount of feed type D, as reported.",
+          "example": 0
+        },
+        "source": {
+          "type": "string",
+          "description": "Constant identifying which DataSource produced this record.",
+          "example": "feed_distribution"
+        }
+      },
+      "how_to_query": {
+        "python": "vault.fetch_all('feed_distribution_data')",
+        "dashboard_js": "fetchAll(settings, 'feed_distribution_data')",
+        "graphql": "metaEnvelopes(filter: { ontologyId: \"feed_distribution_data\" }, first: 100, after: $cursor) { edges { node { parsed } } pageInfo { hasNextPage endCursor } }"
+      }
+    },
+    "milking_production_data": {
+      "status": "active",
+      "written_by": "uploader (source type: production_report)",
+      "read_by": [
+        "dashboard (/api/stats: speed/lactation scatter)",
+        "agent (cow_speed_drop findings)"
+      ],
+      "ontology_id": "milking_production_data",
+      "vault_path_pattern": "{collection}/{animal_number}/{id}",
+      "vault_path_example": "milking_production_data/5559/5559_2026-07-05",
+      "fields": {
+        "schema_version": {
+          "type": "integer",
+          "description": "Bumped when this record's shape changes.",
+          "example": 1
+        },
+        "id": {
+          "type": "string",
+          "description": "Unique within the collection (one snapshot per cow per report date); used for dedup on upload.",
+          "format": "{animal_number}_{report_date}",
+          "example": "5559_2026-07-05"
+        },
+        "animal_number": {
+          "type": "integer",
+          "description": "4-digit animal tag number (same numbering as milking_controle_data).",
+          "example": 5559
+        },
+        "report_date": {
+          "type": "string",
+          "description": "Date the snapshot describes (ISO 8601 date), taken from the file name.",
+          "example": "2026-07-05"
+        },
+        "milk_24h_kg": {
+          "type": "number",
+          "description": "Milk produced in the last 24 hours (kg), as reported by the robot.",
+          "example": 14.8
+        },
+        "milk_10d_avg_kg": {
+          "type": "number",
+          "description": "10-day average of the 24h production (kg), as computed by the robot.",
+          "example": 16.1
+        },
+        "lactation_number": {
+          "type": "integer",
+          "description": "Lactation number according to the ROBOT's herd registration. Less reliable than CRV; see field_authority in VAULT_SCHEMA.json -- CRV (mpr_uitslag) becomes the leading source for this once uploaded.",
+          "example": 1
+        },
+        "average_milking_speed_kg_min": {
+          "type": "number",
+          "description": "Average milking speed (kg/min), as measured by the robot. The robot is the authoritative source for this field.",
+          "example": 2.0
+        },
+        "lactation_days": {
+          "type": "integer",
+          "description": "Days in lactation according to the ROBOT's registration. Less reliable than CRV; see field_authority in VAULT_SCHEMA.json.",
+          "example": 229
+        },
+        "source": {
+          "type": "string",
+          "description": "Constant identifying which DataSource produced this record.",
+          "example": "milking_robot_production"
+        }
+      },
+      "how_to_query": {
+        "python": "vault.fetch_all('milking_production_data')",
+        "dashboard_js": "fetchAll(settings, 'milking_production_data')",
+        "graphql": "metaEnvelopes(filter: { ontologyId: \"milking_production_data\" }, first: 100, after: $cursor) { edges { node { parsed } } pageInfo { hasNextPage endCursor } }"
+      }
+    },
+    "milking_insights": {
+      "status": "active",
+      "written_by": "agent (local LLM analysis of milking_controle_data)",
+      "read_by": [
+        "dashboard (/api/insights)"
+      ],
+      "ontology_id": "milking_insights",
+      "vault_path_pattern": "{collection}/{type}/{id}",
+      "vault_path_example": "milking_insights/cow_yield_drop/insight_2026-07-18_a3f9c1_cow_yield_drop_5337",
+      "fields": {
+        "schema_version": {
+          "type": "integer",
+          "description": "Bumped when this record's shape changes.",
+          "example": 2
+        },
+        "id": {
+          "type": "string",
+          "description": "Unique within the collection, and deterministic for a given analysis date + analysed dataset + finding + subject. Re-running on unchanged data therefore stores nothing (the eVault has no overwrite-on-id), while re-running after new data was uploaded produces a fresh batch.",
+          "format": "insight_{analysis_date}_{dataset_key}_{kind}_{subject}",
+          "example": "insight_2026-07-18_a3f9c1_cow_yield_drop_5337"
+        },
+        "created_at": {
+          "type": "string",
+          "description": "When the agent produced this insight (ISO 8601).",
+          "example": "2026-07-17T03:00:00"
+        },
+        "type": {
+          "type": "string",
+          "description": "Which analysis produced this insight.",
+          "enum": {
+            "herd_yield_change": "herd-level yield moved vs the baseline window",
+            "herd_failure_rate": "share of milkings not finishing normally is high",
+            "cow_yield_drop": "one cow produces clearly less than her own baseline",
+            "cow_yield_rise": "one cow produces clearly more than her own baseline",
+            "cow_interval_rise": "one cow visits the robot noticeably less often",
+            "cow_feed_left": "one cow repeatedly leaves feed uneaten (early illness signal)",
+            "herd_feed_efficiency_change": "liters of milk per kg of feed moved vs baseline",
+            "cow_speed_drop": "one cow's milking speed dropped between production reports"
+          },
+          "example": "cow_yield_drop"
+        },
+        "severity": {
+          "type": "string",
+          "description": "How far the measurement deviates.",
+          "enum": {
+            "high": "large deviation",
+            "medium": "worth watching"
+          },
+          "example": "high"
+        },
+        "scope": {
+          "type": "object",
+          "description": "What the insight is about: {'animal_number': 5337} for one cow, {'herd': true} for the whole herd. Use animal_number to join back to milking_controle_data.",
+          "example": {
+            "animal_number": 5337
+          }
+        },
+        "period": {
+          "type": "object",
+          "description": "The measurement dates this insight is based on. The recent window runs data_from -> data_until, compared against the baseline window baseline_from -> data_from. Anchored on the newest record in the vault, NOT on the analysis date -- if data_until is well before created_at, the underlying data is running behind.",
+          "example": {
+            "data_from": "2026-07-11",
+            "data_until": "2026-07-18",
+            "baseline_from": "2026-06-13"
+          }
+        },
+        "title": {
+          "type": "string",
+          "description": "One-line summary, written by the model.",
+          "example": "Cow 5337 is producing 18% below her own average"
+        },
+        "body": {
+          "type": "string",
+          "description": "Explanation and suggested action, written by the model.",
+          "example": "Her daily yield fell from 34.8 to 28.5 L/day over the past week..."
+        },
+        "evidence": {
+          "type": "object",
+          "description": "The exact figures this insight is based on, computed in Python (never by the model). Makes every insight auditable.",
+          "example": {
+            "recent_liters_per_day": 28.5,
+            "baseline_liters_per_day": 34.8
+          }
+        },
+        "model": {
+          "type": "string",
+          "description": "Which model wrote title/body, e.g. 'ollama:gemma3'.",
+          "example": "ollama:gemma3"
+        },
+        "source": {
+          "type": "string",
+          "description": "Constant identifying the writing platform.",
+          "example": "ai_agent"
+        }
+      },
+      "how_to_query": {
+        "python": "vault.fetch_all('milking_insights')",
+        "dashboard_js": "fetchAll(settings, 'milking_insights')",
+        "graphql": "metaEnvelopes(filter: { ontologyId: \"milking_insights\" }, first: 100, after: $cursor) { edges { node { parsed } } pageInfo { hasNextPage endCursor } }"
+      },
+      "note": "Insights are written by a separate post-platform. 'evidence' holds figures computed in Python; 'title'/'body' are worded by the model named in 'model' -- so every insight can be checked against its own numbers."
+    },
+    "mpr_uitslag": {
+      "status": "planned",
+      "written_by": null,
+      "read_by": [],
+      "ontology_id": "mpr_uitslag",
+      "vault_path_pattern": null,
+      "vault_path_example": null,
+      "fields": null,
+      "note": "CRV MPR results per cow per sampling (Dieroverzicht): levensnummer + werknummer, cell count, fat/protein %, urea, lactation number and days. Parser not built yet. Once uploaded, this is the leading source for lactation data (see field_authority) and the only source for cell count. Links to the robot collections via werknummer (animal_number); the levensnummer <-> werknummer mapping lives in milking_controle_data (registration_number)."
+    }
+  }
+}

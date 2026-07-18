@@ -1,9 +1,12 @@
 {
     "base_path": "milking_controle_data",
+    "feed_path": "feed_distribution_data",
+    "production_path": "milking_production_data",
     "insights_path": "milking_insights",
     "refresh_ms": 30000,
     "cache_ttl_ms": 15000,
     "yield_divisor": 1000,
+    "feed_divisor": 1000,
     "vault": {
         "mode": "evault",
         "local_path": "../evault_local",
@@ -12,6 +15,8 @@
         "platform": "melkmonitor-dashboard",
         "schema_ids": {
             "milking_controle_data": "milking_controle_data",
+            "feed_distribution_data": "feed_distribution_data",
+            "milking_production_data": "milking_production_data",
             "milking_insights": "milking_insights"
         }
     }

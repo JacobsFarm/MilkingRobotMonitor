@@ -41,7 +41,9 @@
         dailyTrend: { labels: [], liters: [], counts: [] },
         status: [],
         weekly: { labels: [], counts: [], liters: [] },
-        recent: []
+        recent: [],
+        feed: { available: false },
+        production: { available: false }
     };
 
     let stats = EMPTY_STATS;
@@ -49,6 +51,11 @@
     let refreshMs = 30000;
     let loadError = '';
     let loading = false;
+
+    // AI-bevindingen: door de agent (apart post-platform) in de eVault
+    // geschreven; het dashboard leest ze alleen.
+    let insights = [];
+    let insightsDate = null;
 
     // Slimme poll: de signature dekt dataset + filters; bij een match stuurt
     // de server een lege "unchanged"-respons in plaats van dezelfde cijfers.
@@ -99,11 +106,26 @@
         return query ? `?${query}` : '';
     }
 
+    async function loadInsights() {
+        try {
+            const response = await fetch('/api/insights');
+            if (!response.ok) {
+                return;
+            }
+            const payload = await response.json();
+            insights = payload.insights ?? [];
+            insightsDate = payload.analysis_date ?? null;
+        } catch {
+            // Bevindingen zijn optioneel: bij een fout blijft de vorige lijst staan.
+        }
+    }
+
     async function load() {
         if (loading) {
             return;
         }
         loading = true;
+        loadInsights();
         const requestedKey = filterKey;
         try {
             const response = await fetch(`/api/stats${buildQuery()}`);
@@ -172,6 +194,79 @@
         dateTo = '';
     }
 
+    // ---- AI-bevindingen (presentatie) ----
+    const INSIGHT_TYPE_LABELS = {
+        herd_yield_change: 'Kudde-opbrengst',
+        herd_failure_rate: 'Mislukte melkingen',
+        cow_yield_drop: 'Opbrengst gedaald',
+        cow_yield_rise: 'Opbrengst gestegen',
+        cow_interval_rise: 'Langere tussenpozen',
+        cow_feed_left: 'Voer laten staan',
+        herd_feed_efficiency_change: 'Voerefficiëntie',
+        cow_speed_drop: 'Melksnelheid gedaald'
+    };
+
+    function insightTypeLabel(insight) {
+        return INSIGHT_TYPE_LABELS[insight.type] ?? insight.type;
+    }
+
+    function insightEvidence(insight) {
+        const e = insight.evidence ?? {};
+        const parts = [];
+        if (e.baseline_liters_per_day != null && e.recent_liters_per_day != null) {
+            parts.push(
+                `${fmt(e.baseline_liters_per_day, 1)} → ${fmt(e.recent_liters_per_day, 1)} L/dag`
+            );
+        } else if (e.baseline_avg_interval_hours != null && e.recent_avg_interval_hours != null) {
+            parts.push(
+                `${fmt(e.baseline_avg_interval_hours, 1)}u → ${fmt(e.recent_avg_interval_hours, 1)}u tussen melkingen`
+            );
+        } else if (e.failed != null && e.total != null) {
+            parts.push(`${fmt(e.failed, 0)} van ${fmt(e.total, 0)} melkingen niet normaal afgerond`);
+        } else if (e.not_finished != null && e.feedings != null) {
+            parts.push(`${fmt(e.not_finished, 0)} van ${fmt(e.feedings, 0)} voerbeurten niet leeg`);
+        } else if (e.baseline_liters_per_kg != null && e.recent_liters_per_kg != null) {
+            parts.push(
+                `${fmt(e.baseline_liters_per_kg, 2)} → ${fmt(e.recent_liters_per_kg, 2)} L melk per kg voer`
+            );
+        } else if (e.previous_speed_kg_min != null && e.latest_speed_kg_min != null) {
+            parts.push(
+                `${fmt(e.previous_speed_kg_min, 2)} → ${fmt(e.latest_speed_kg_min, 2)} kg/min (rapport ${dmy(e.latest_report)})`
+            );
+        }
+        if (e.recent_days_measured != null) {
+            parts.push(`gemeten op ${e.recent_days_measured} dagen`);
+        } else if (e.recent_intervals_measured != null) {
+            parts.push(`${e.recent_intervals_measured} tussenpozen gemeten`);
+        }
+        return parts.join(' · ');
+    }
+
+    function dmy(isoDate) {
+        if (typeof isoDate !== 'string' || isoDate.length < 10) return isoDate ?? '–';
+        const [year, month, day] = isoDate.slice(0, 10).split('-');
+        return `${day}-${month}-${year}`;
+    }
+
+    // Alle bevindingen van één analyse delen dezelfde meetperiode.
+    $: insightPeriod = insights.find((i) => i.period)?.period ?? null;
+    // De vensters zijn verankerd op de nieuwste melking in de eVault, niet op
+    // de analysedatum: loopt de data achter, dan hoort dat zichtbaar te zijn.
+    $: insightsStaleDays =
+        insightPeriod && insightsDate
+            ? Math.round(
+                  (new Date(insightsDate) - new Date(insightPeriod.data_until)) / 86400000
+              )
+            : 0;
+
+    function focusInsightCow(insight) {
+        const animal = insight.scope?.animal_number;
+        if (animal != null) {
+            // Filtert het hele dashboard op deze koe; de grafieken laden opnieuw.
+            selectedCows = [String(animal)];
+        }
+    }
+
     // ---- Filteropties (waarden van de server, labels hier) ----
     $: cowOptions = stats.options.cows.map((cow) => ({ value: cow, label: `Koe ${cow}` }));
     $: monthOptions = stats.options.months.map((month) => ({
@@ -181,6 +276,26 @@
     $: weekOptions = stats.options.weeks.map((week) => ({ value: week, label: weekLabel(week) }));
 
     // ---- Kerncijfers ----
+    $: extraCards = [
+        ...(stats.feed.available && stats.feed.totals.litersPerKg != null
+            ? [
+                  {
+                      label: 'Voerefficiëntie (L melk / kg voer)',
+                      value: fmt(stats.feed.totals.litersPerKg, 2),
+                      sub: `over ${stats.feed.totals.overlapDays} dagen met beide metingen`
+                  }
+              ]
+            : []),
+        ...(stats.production.available && stats.production.latest.avgSpeed != null
+            ? [
+                  {
+                      label: 'Gem. melksnelheid (kg/min)',
+                      value: fmt(stats.production.latest.avgSpeed, 2),
+                      sub: `rapport ${dmy(stats.production.latestDate)} · ${stats.production.latest.cowCount} koeien`
+                  }
+              ]
+            : [])
+    ];
     $: statCards = [
         {
             label: 'Aantal melkingen',
@@ -360,6 +475,105 @@
         ]
     };
 
+    // ---- Voer × melk (server joint op dag; zelfde filters als de rest) ----
+    $: feedMilkChartData = stats.feed.available
+        ? {
+              labels: stats.feed.dailyTrend.labels,
+              datasets: [
+                  {
+                      type: 'bar',
+                      label: 'Voergift per dag (kg)',
+                      data: stats.feed.dailyTrend.feedKg,
+                      backgroundColor: 'rgba(180, 83, 9, 0.45)',
+                      yAxisID: 'y'
+                  },
+                  {
+                      type: 'line',
+                      label: 'Melkgift per dag (L)',
+                      data: stats.feed.dailyTrend.milkLiters,
+                      borderColor: '#2e8b57',
+                      backgroundColor: '#2e8b57',
+                      pointRadius: 1,
+                      tension: 0.2,
+                      spanGaps: false,
+                      yAxisID: 'y1'
+                  }
+              ]
+          }
+        : null;
+
+    $: efficiencyChartData = stats.feed.available
+        ? {
+              labels: stats.feed.dailyTrend.labels,
+              datasets: [
+                  {
+                      type: 'line',
+                      label: 'Efficiëntie (L melk per kg voer)',
+                      data: stats.feed.dailyTrend.efficiency,
+                      borderColor: '#1d4ed8',
+                      backgroundColor: '#1d4ed8',
+                      pointRadius: 1,
+                      tension: 0.2,
+                      spanGaps: false,
+                      yAxisID: 'y'
+                  },
+                  {
+                      type: 'line',
+                      label: 'Restvoer (% voerbeurten niet leeg)',
+                      data: stats.feed.dailyTrend.leftoverPct,
+                      borderColor: '#c0392b',
+                      backgroundColor: '#c0392b',
+                      pointRadius: 1,
+                      tension: 0.2,
+                      spanGaps: false,
+                      yAxisID: 'y1'
+                  }
+              ]
+          }
+        : null;
+
+    $: leftoversChartData = stats.feed.available
+        ? {
+              labels: stats.feed.leftovers.topCows.map((c) => `Koe ${c.animal}`),
+              datasets: [
+                  {
+                      label: 'Voerbeurten niet leeggegeten',
+                      data: stats.feed.leftovers.topCows.map((c) => c.notFinished),
+                      backgroundColor: 'rgba(192, 57, 43, 0.55)'
+                  }
+              ]
+          }
+        : null;
+
+    // ---- Productie-snapshots (melksnelheid is robot-authoritatief) ----
+    $: speedScatterData = stats.production.available
+        ? {
+              datasets: [
+                  {
+                      label: 'Koe (nieuwste rapport)',
+                      data: stats.production.points
+                          .filter((p) => p.speed != null && p.milk24 != null)
+                          .map((p) => ({ x: p.speed, y: p.milk24, animal: p.animal })),
+                      backgroundColor: 'rgba(29, 78, 216, 0.7)'
+                  }
+              ]
+          }
+        : null;
+
+    $: lactationScatterData = stats.production.available
+        ? {
+              datasets: [
+                  {
+                      label: 'Koe (nieuwste rapport)',
+                      data: stats.production.points
+                          .filter((p) => p.lactationDays != null && p.milk24 != null)
+                          .map((p) => ({ x: p.lactationDays, y: p.milk24, animal: p.animal })),
+                      backgroundColor: 'rgba(46, 139, 87, 0.7)'
+                  }
+              ]
+          }
+        : null;
+
     // ---- Chartopties ----
     const baseOptions = {
         responsive: true,
@@ -395,6 +609,36 @@
         indexAxis: 'y',
         scales: { x: { beginAtZero: true, title: { display: true, text: 'Uren' } } }
     };
+
+    const leftoverRankOptions = {
+        ...baseOptions,
+        indexAxis: 'y',
+        scales: {
+            x: {
+                beginAtZero: true,
+                ticks: { precision: 0 },
+                title: { display: true, text: 'Voerbeurten niet leeg' }
+            }
+        }
+    };
+
+    const scatterOptions = (xTitle, yTitle) => ({
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                callbacks: {
+                    label: (ctx) =>
+                        ` Koe ${ctx.raw.animal}: ${ctx.parsed.x} ${xTitle}, ${ctx.parsed.y} ${yTitle}`
+                }
+            }
+        },
+        scales: {
+            x: { title: { display: true, text: xTitle } },
+            y: { beginAtZero: true, title: { display: true, text: yTitle } }
+        }
+    });
 
     const donutOptions = {
         responsive: true,
@@ -477,6 +721,69 @@
 
     <section class="layout">
         <div class="charts">
+            {#if insights.length}
+                <div class="card wide">
+                    <div class="insights-head">
+                        <h3>AI-bevindingen</h3>
+                        <span class="insights-meta">
+                            analyse van {dmy(insightsDate)} · {insights.length} bevindingen
+                            {#if insightPeriod}
+                                · meetperiode {dmy(insightPeriod.data_from)} t/m {dmy(
+                                    insightPeriod.data_until
+                                )}, vergeleken met {dmy(insightPeriod.baseline_from)} t/m {dmy(
+                                    insightPeriod.data_from
+                                )}
+                            {/if}
+                        </span>
+                        {#if insightsStaleDays > 2}
+                            <span class="insights-stale">
+                                ⚠ nieuwste melking in de eVault is van {dmy(
+                                    insightPeriod.data_until
+                                )} — de data loopt {insightsStaleDays} dagen achter
+                            </span>
+                        {/if}
+                    </div>
+                    <ul class="insight-list">
+                        {#each insights as insight (insight.id)}
+                            <li class="insight {insight.severity}">
+                                <div class="insight-top">
+                                    <span class="insight-badge {insight.severity}">
+                                        {insight.severity === 'high' ? 'Hoog' : 'Let op'}
+                                    </span>
+                                    <span class="insight-kind">{insightTypeLabel(insight)}</span>
+                                    {#if insight.scope?.animal_number != null}
+                                        <button
+                                            type="button"
+                                            class="cow-link"
+                                            title="Filter het dashboard op deze koe"
+                                            on:click={() => focusInsightCow(insight)}
+                                        >
+                                            koe {insight.scope.animal_number} →
+                                        </button>
+                                    {/if}
+                                </div>
+                                <p class="insight-title">{insight.title}</p>
+                                {#if insight.body}
+                                    <p class="insight-body">{insight.body}</p>
+                                {/if}
+                                <p class="insight-evidence">
+                                    {insightEvidence(insight)}
+                                    {#if insight.evidence?.change_pct != null}
+                                        ({insight.evidence.change_pct > 0 ? '+' : ''}{fmt(
+                                            insight.evidence.change_pct,
+                                            1
+                                        )}%)
+                                    {/if}
+                                    {#if insight.model}
+                                        · {insight.model}
+                                    {/if}
+                                </p>
+                            </li>
+                        {/each}
+                    </ul>
+                </div>
+            {/if}
+
             <div class="card wide">
                 <h3>Heatmap: aantal melkingen per uur en dag</h3>
                 <Heatmap matrix={stats.heatmaps.count} unit="melkingen" decimals={0} />
@@ -546,6 +853,66 @@
                 </div>
             </div>
 
+            {#if stats.feed.available}
+                <div class="card wide">
+                    <h3>Voergift vs. melkgift per dag</h3>
+                    <div class="chart">
+                        <ChartBox
+                            type="bar"
+                            data={feedMilkChartData}
+                            options={dualAxis('Voer (kg)', 'Melk (L)')}
+                        />
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Voerefficiëntie & restvoer per dag</h3>
+                    <div class="chart">
+                        <ChartBox
+                            type="line"
+                            data={efficiencyChartData}
+                            options={dualAxis('L melk / kg voer', 'Restvoer %')}
+                        />
+                    </div>
+                </div>
+                <div class="card">
+                    <h3>Restvoer per koe (mogelijk vroeg ziektesignaal)</h3>
+                    <div class="chart">
+                        <ChartBox
+                            type="bar"
+                            data={leftoversChartData}
+                            options={leftoverRankOptions}
+                        />
+                    </div>
+                </div>
+            {/if}
+
+            {#if stats.production.available}
+                <div class="card">
+                    <h3>
+                        Melksnelheid vs. dagproductie per koe (rapport
+                        {dmy(stats.production.latestDate)})
+                    </h3>
+                    <div class="chart">
+                        <ChartBox
+                            type="scatter"
+                            data={speedScatterData}
+                            options={scatterOptions('kg/min', 'kg per 24u')}
+                        />
+                    </div>
+                </div>
+                <div class="card">
+                    <h3>Lactatiecurve: dagen in lactatie vs. dagproductie</h3>
+                    <div class="chart">
+                        <ChartBox
+                            type="scatter"
+                            data={lactationScatterData}
+                            options={scatterOptions('dagen in lactatie', 'kg per 24u')}
+                        />
+                    </div>
+                </div>
+            {/if}
+
             <div class="card wide">
                 <h3>Recente melkingen</h3>
                 <div class="table-wrapper">
@@ -582,7 +949,7 @@
         </div>
 
         <aside class="stats">
-            {#each statCards as card}
+            {#each [...statCards, ...extraCards] as card}
                 <div class="card stat">
                     <span class="stat-label">{card.label}</span>
                     <span class="stat-value">{card.value}</span>
@@ -815,6 +1182,115 @@
         position: sticky;
         top: 0;
         background: white;
+    }
+
+    .insights-head {
+        display: flex;
+        align-items: baseline;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .insights-meta {
+        font-size: 0.76rem;
+        color: #6b7280;
+    }
+
+    .insights-stale {
+        flex-basis: 100%;
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: #b45309;
+    }
+
+    .insight-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        max-height: 340px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .insight {
+        border: 1px solid #eceff3;
+        border-left-width: 4px;
+        border-radius: 6px;
+        padding: 0.5rem 0.7rem;
+    }
+
+    .insight.high {
+        border-left-color: #c0392b;
+    }
+
+    .insight.medium {
+        border-left-color: #e69500;
+    }
+
+    .insight-top {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .insight-badge {
+        font-size: 0.68rem;
+        font-weight: 700;
+        padding: 0.1rem 0.45rem;
+        border-radius: 999px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+
+    .insight-badge.high {
+        background: #fdecea;
+        color: #c0392b;
+    }
+
+    .insight-badge.medium {
+        background: #fef5e7;
+        color: #b45309;
+    }
+
+    .insight-kind {
+        font-size: 0.76rem;
+        font-weight: 600;
+        color: #6b7280;
+    }
+
+    .cow-link {
+        margin-left: auto;
+        border: none;
+        background: none;
+        color: #175e38;
+        font-size: 0.78rem;
+        font-weight: 600;
+        cursor: pointer;
+        padding: 0.1rem 0.3rem;
+    }
+
+    .cow-link:hover {
+        text-decoration: underline;
+    }
+
+    .insight-title {
+        margin: 0.3rem 0 0;
+        font-size: 0.88rem;
+        font-weight: 600;
+    }
+
+    .insight-body {
+        margin: 0.25rem 0 0;
+        font-size: 0.82rem;
+        color: #374151;
+    }
+
+    .insight-evidence {
+        margin: 0.3rem 0 0;
+        font-size: 0.74rem;
+        color: #6b7280;
     }
 
     @media (max-width: 1100px) {

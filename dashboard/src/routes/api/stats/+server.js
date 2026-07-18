@@ -12,10 +12,19 @@ export async function GET({ url }) {
     const filters = normalizeFilters(url.searchParams);
     const { signature, stats } = await getMilkingStats(settings, filters);
 
+    // Laadvoortgang over alle collecties samen, voor de UI-banner.
+    const statuses = [
+        settings.base_path ?? 'milking_controle_data',
+        settings.feed_path ?? 'feed_distribution_data',
+        settings.production_path ?? 'milking_production_data'
+    ].map((path) => collectionStatus(settings, path));
+
     const base = {
         signature,
-        // Laadvoortgang van de eVault-achtergrondfetch, voor de UI-banner.
-        progress: collectionStatus(settings, settings.base_path ?? 'milking_controle_data'),
+        progress: {
+            complete: statuses.every((s) => s.complete),
+            loaded: statuses.reduce((acc, s) => acc + (s.loaded ?? 0), 0)
+        },
         refresh_ms: settings.refresh_ms ?? 30000,
         fetched_at: new Date().toISOString()
     };

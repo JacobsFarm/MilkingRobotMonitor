@@ -1,0 +1,31 @@
+{
+    "source_collection": "milking_controle_data",
+    "feed_collection": "feed_distribution_data",
+    "production_collection": "milking_production_data",
+    "insights_collection": "milking_insights",
+    "yield_divisor": 1000,
+    "feed_divisor": 1000,
+    "recent_window_days": 7,
+    "baseline_window_days": 28,
+    "interval_seconds": 21600,
+    "llm": {
+        "provider": "ollama",
+        "host": "http://localhost:11434",
+        "model": "gemma3:12b",
+        "temperature": 0.2,
+        "timeout_seconds": 180
+    },
+    "vault": {
+        "mode": "evault",
+        "local_path": "../evault_local",
+        "registry_url": "https://registry.w3ds.metastate.foundation",
+        "w3id": "@your-farm-ename",
+        "platform": "melkmonitor-ai-agent",
+        "schema_ids": {
+            "milking_controle_data": "milking_controle_data",
+            "milking_insights": "milking_insights",
+            "feed_distribution_data": "feed_distribution_data",
+            "milking_production_data": "milking_production_data"
+        }
+    }
+}

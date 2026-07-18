@@ -54,10 +54,11 @@ const TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 const PAGE_SIZE = 100;
 const MAX_RETRIES = 8;
 const MAX_BACKOFF_MS = 30000;
-// How long a fully-loaded collection stays fresh before a background re-page.
-// Kept high because a full page-through is minutes long; new data only appears
-// when the uploader runs, so a few minutes of lag is fine.
-const FULL_REFRESH_MS = 10 * 60 * 1000;
+// Hoe vaak een volledig geladen collectie op nieuwe records wordt gecontroleerd.
+// Die controle is één request (zie COUNT_QUERY); alleen als de telling verandert
+// volgt de dure herlezing. Daarom kan dit kort zijn: nieuwe uploads zijn snel
+// zichtbaar zonder de server te belasten.
+const FULL_REFRESH_MS = 2 * 60 * 1000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -73,6 +74,18 @@ const FETCH_QUERY = `
             edges { node { parsed } }
             pageInfo { hasNextPage endCursor }
         }
+    }
+`;
+
+// Eén request die zegt hoeveel records de collectie telt. Alleen fetchen wat
+// nieuw is kan niet: het filter kent geen datumveld en de volgorde loopt op de
+// van de inhoud afgeleide UUID van elke envelope, dus nieuwe records komen
+// verspreid door de reeks te staan in plaats van achteraan (geverifieerd tegen
+// productie — hervatten vanaf een bewaarde cursor zou ze overslaan). Tellen is
+// daarom de goedkope manier om te weten of een volledige herlezing nodig is.
+const COUNT_QUERY = `
+    query CountMetaEnvelopes($filter: MetaEnvelopeFilterInput) {
+        metaEnvelopes(filter: $filter, first: 1) { totalCount }
     }
 `;
 
@@ -213,11 +226,27 @@ function fetchAllEVault(vault, basePath) {
 }
 
 async function refreshEVault(vault, basePath) {
-    const hadComplete = recordCache.get(basePath)?.complete === true;
+    const existing = recordCache.get(basePath);
+    const hadComplete = existing?.complete === true;
     const records = [];
     let after = null;
     try {
         const schemaId = schemaFor(vault, basePath);
+
+        // Een volledige herlezing is honderden requests tegen een gelimiteerde
+        // server. Als de telling gelijk is aan wat we al hebben, is de cache nog
+        // exact en slaan we die hele ronde over.
+        if (hadComplete) {
+            const counted = await graphql(vault, COUNT_QUERY, {
+                filter: { ontologyId: schemaId }
+            });
+            const total = counted.metaEnvelopes?.totalCount;
+            if (Number.isFinite(total) && total === existing.records.length) {
+                recordCache.set(basePath, { ...existing, fetchedAt: Date.now() });
+                return;
+            }
+        }
+
         for (;;) {
             const data = await graphql(vault, FETCH_QUERY, {
                 filter: { ontologyId: schemaId },

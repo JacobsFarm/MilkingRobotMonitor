@@ -4,11 +4,13 @@ Explicit imports (no dynamic discovery) so PyInstaller bundles every source
 into the standalone .exe. Add new sources here and in config ``sources``.
 """
 
+from app.sources.feed_distribution import FeedDistributionSource
 from app.sources.milking_robot import MilkingRobotSource
+from app.sources.production_report import ProductionReportSource
 
 SOURCE_TYPES = {
     source_class.type_name: source_class
-    for source_class in (MilkingRobotSource,)
+    for source_class in (MilkingRobotSource, FeedDistributionSource, ProductionReportSource)
 }
 
 

@@ -16,9 +16,10 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root, for `core`
 
 from app.config import load_settings
-from app.vault_client import create_vault_client
+from core.vault_client import create_vault_client
 
 TEST_COLLECTION = "melkmonitor_selftest"
 FETCH_RETRIES = 5
