@@ -54,10 +54,10 @@ const TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 const PAGE_SIZE = 100;
 const MAX_RETRIES = 8;
 const MAX_BACKOFF_MS = 30000;
-// Hoe vaak een volledig geladen collectie op nieuwe records wordt gecontroleerd.
-// Die controle is één request (zie COUNT_QUERY); alleen als de telling verandert
-// volgt de dure herlezing. Daarom kan dit kort zijn: nieuwe uploads zijn snel
-// zichtbaar zonder de server te belasten.
+// How often a fully loaded collection is checked for new records. That check is
+// a single request (see COUNT_QUERY); the expensive re-read only follows when
+// the count changes. So this can be short: new uploads show up quickly without
+// putting load on the server.
 const FULL_REFRESH_MS = 2 * 60 * 1000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -77,12 +77,12 @@ const FETCH_QUERY = `
     }
 `;
 
-// Eén request die zegt hoeveel records de collectie telt. Alleen fetchen wat
-// nieuw is kan niet: het filter kent geen datumveld en de volgorde loopt op de
-// van de inhoud afgeleide UUID van elke envelope, dus nieuwe records komen
-// verspreid door de reeks te staan in plaats van achteraan (geverifieerd tegen
-// productie — hervatten vanaf een bewaarde cursor zou ze overslaan). Tellen is
-// daarom de goedkope manier om te weten of een volledige herlezing nodig is.
+// A single request that says how many records the collection holds. Fetching
+// only what is new is not possible: the filter has no date field and the order
+// runs on each envelope's content-derived UUID, so new records end up scattered
+// through the sequence instead of at the end (verified against production —
+// resuming from a stored cursor would skip them). Counting is therefore the
+// cheap way to know whether a full re-read is needed.
 const COUNT_QUERY = `
     query CountMetaEnvelopes($filter: MetaEnvelopeFilterInput) {
         metaEnvelopes(filter: $filter, first: 1) { totalCount }
@@ -186,16 +186,16 @@ async function graphql(vault, query, variables) {
 }
 
 function schemaFor(vault, basePath) {
-    // Zonder expliciete mapping is de collectienaam zelf de ontology-id (een
-    // vaste string werkt — store en fetch moeten hem alleen eens zijn). Een in
-    // de Ontology service geregistreerde W3ID mappen onder vault.schema_ids is
-    // pas nodig voor interoperabiliteit met andere W3DS-platforms.
+    // Without an explicit mapping the collection name itself is the ontology id
+    // (a fixed string works — store and fetch just have to agree on it). Mapping
+    // a W3ID registered in the Ontology service under vault.schema_ids is only
+    // needed for interoperability with other W3DS platforms.
     const logical = basePath.split('/', 1)[0];
     return vault.schema_ids?.[logical] ?? logical;
 }
 
-// Laadstatus van een collectie, voor voortgangsweergave in de UI terwijl de
-// achtergrond-fetch nog door de eVault-pagina's loopt.
+// Load status of a collection, for showing progress in the UI while the
+// background fetch is still paging through the eVault.
 export function collectionStatus(settings, basePath) {
     if (settings.vault?.mode !== 'evault') {
         return { complete: true, loaded: null, refreshing: false, fetchedAt: null };
@@ -233,9 +233,9 @@ async function refreshEVault(vault, basePath) {
     try {
         const schemaId = schemaFor(vault, basePath);
 
-        // Een volledige herlezing is honderden requests tegen een gelimiteerde
-        // server. Als de telling gelijk is aan wat we al hebben, is de cache nog
-        // exact en slaan we die hele ronde over.
+        // A full re-read is hundreds of requests against a rate-limited server.
+        // If the count equals what we already have, the cache is still exact and
+        // we skip that whole round.
         if (hadComplete) {
             const counted = await graphql(vault, COUNT_QUERY, {
                 filter: { ontologyId: schemaId }

@@ -22,9 +22,9 @@ export async function GET() {
         return json({ insights: [], analysis_date: null, total: all.length });
     }
 
-    // Elke analyse-run stempelt al zijn bevindingen met dezelfde created_at, en
-    // nieuw geüploade data levert een nieuwe run op. Filteren op de exacte
-    // laatste created_at geeft dus precies één batch — de meest recente.
+    // Every analysis run stamps all of its findings with the same created_at,
+    // and newly uploaded data produces a new run. Filtering on the exact latest
+    // created_at therefore yields precisely one batch — the most recent one.
     const latestRun = dated.reduce(
         (max, record) => (record.created_at > max ? record.created_at : max),
         ''

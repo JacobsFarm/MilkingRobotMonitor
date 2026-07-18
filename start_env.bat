@@ -1,10 +1,10 @@
 @echo off
-REM Opent de terminal in deze map met conda base actief - zoekt conda automatisch
+REM Opens the terminal in this folder with conda base active - finds conda automatically
 cd /d "%~dp0"
 
 set "CONDA_ACT="
 
-REM 1) Bekende installatielocaties aflopen
+REM 1) Walk through the known install locations
 for %%P in (
     "%USERPROFILE%\miniconda3"
     "%USERPROFILE%\anaconda3"
@@ -20,7 +20,7 @@ for %%P in (
     if not defined CONDA_ACT if exist "%%~P\Scripts\activate.bat" set "CONDA_ACT=%%~P\Scripts\activate.bat"
 )
 
-REM 2) Niet gevonden? Probeer conda op PATH via 'where'
+REM 2) Not found? Try conda on PATH via 'where'
 if not defined CONDA_ACT (
     for /f "delims=" %%C in ('where conda 2^>nul') do (
         if not defined CONDA_ACT (
@@ -32,6 +32,6 @@ if not defined CONDA_ACT (
 if defined CONDA_ACT (
     cmd /k ""%CONDA_ACT%""
 ) else (
-    echo Conda niet gevonden - controleer je installatie
+    echo Conda not found - check your installation
     cmd /k
 )

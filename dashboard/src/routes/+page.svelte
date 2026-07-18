@@ -5,14 +5,14 @@
     import MultiSelect from '$lib/components/MultiSelect.svelte';
     import { DAY_LABELS, fmt, monthLabel, weekLabel } from '$lib/format.js';
 
-    // Deze pagina is puur presentatie: alle statistiek wordt op de server
-    // berekend (lib/server/aggregate.js) en komt kant-en-klaar binnen via
-    // /api/stats. Filters gaan als query-parameters mee naar de server.
+    // This page is pure presentation: all statistics are computed on the server
+    // (lib/server/aggregate.js) and arrive ready-made via /api/stats. Filters
+    // travel to the server as query parameters.
 
     const STATUS_STYLES = {
-        OK: { color: '#2e8b57', label: 'Geslaagd' },
-        '!': { color: '#e69500', label: 'Mislukt' },
-        '#': { color: '#c0392b', label: 'Fout' }
+        OK: { color: '#2e8b57', label: 'Succeeded' },
+        '!': { color: '#e69500', label: 'Failed' },
+        '#': { color: '#c0392b', label: 'Error' }
     };
 
     const EMPTY_STATS = {
@@ -52,13 +52,13 @@
     let loadError = '';
     let loading = false;
 
-    // AI-bevindingen: door de agent (apart post-platform) in de eVault
-    // geschreven; het dashboard leest ze alleen.
+    // AI findings: written into the eVault by the agent (a separate
+    // post-platform); the dashboard only reads them.
     let insights = [];
     let insightsDate = null;
 
-    // Slimme poll: de signature dekt dataset + filters; bij een match stuurt
-    // de server een lege "unchanged"-respons in plaats van dezelfde cijfers.
+    // Smart poll: the signature covers dataset + filters; on a match the server
+    // sends an empty "unchanged" response instead of the same figures again.
     let lastSignature = '';
     let lastLoadedFilterKey = null;
     let lastUpdated = null;
@@ -116,7 +116,7 @@
             insights = payload.insights ?? [];
             insightsDate = payload.analysis_date ?? null;
         } catch {
-            // Bevindingen zijn optioneel: bij een fout blijft de vorige lijst staan.
+            // Findings are optional: on an error the previous list stays put.
         }
     }
 
@@ -149,7 +149,7 @@
         } finally {
             loading = false;
             if (filterKey !== requestedKey) {
-                // Filters zijn tijdens het laden veranderd: meteen opnieuw.
+                // Filters changed while loading: go again straight away.
                 load();
             } else {
                 schedulePoll();
@@ -159,8 +159,8 @@
 
     function schedulePoll() {
         clearTimeout(pollTimer);
-        // Tijdens het vullen van de eVault-cache vaker verversen, zodat de
-        // grafieken zichtbaar vollopen; daarna het normale interval.
+        // Refresh more often while the eVault cache is filling, so the charts
+        // visibly fill up; after that the normal interval.
         const wait = progress?.complete === false ? 4000 : refreshMs;
         pollTimer = setTimeout(load, wait);
     }
@@ -178,7 +178,7 @@
 
     function clockLabel(date) {
         return date
-            ? date.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+            ? date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
             : '–';
     }
 
@@ -194,16 +194,16 @@
         dateTo = '';
     }
 
-    // ---- AI-bevindingen (presentatie) ----
+    // ---- AI findings (presentation) ----
     const INSIGHT_TYPE_LABELS = {
-        herd_yield_change: 'Kudde-opbrengst',
-        herd_failure_rate: 'Mislukte melkingen',
-        cow_yield_drop: 'Opbrengst gedaald',
-        cow_yield_rise: 'Opbrengst gestegen',
-        cow_interval_rise: 'Langere tussenpozen',
-        cow_feed_left: 'Voer laten staan',
-        herd_feed_efficiency_change: 'Voerefficiëntie',
-        cow_speed_drop: 'Melksnelheid gedaald'
+        herd_yield_change: 'Herd yield',
+        herd_failure_rate: 'Failed milkings',
+        cow_yield_drop: 'Yield dropped',
+        cow_yield_rise: 'Yield rose',
+        cow_interval_rise: 'Longer intervals',
+        cow_feed_left: 'Feed left behind',
+        herd_feed_efficiency_change: 'Feed efficiency',
+        cow_speed_drop: 'Milking speed dropped'
     };
 
     function insightTypeLabel(insight) {
@@ -215,29 +215,29 @@
         const parts = [];
         if (e.baseline_liters_per_day != null && e.recent_liters_per_day != null) {
             parts.push(
-                `${fmt(e.baseline_liters_per_day, 1)} → ${fmt(e.recent_liters_per_day, 1)} L/dag`
+                `${fmt(e.baseline_liters_per_day, 1)} → ${fmt(e.recent_liters_per_day, 1)} L/day`
             );
         } else if (e.baseline_avg_interval_hours != null && e.recent_avg_interval_hours != null) {
             parts.push(
-                `${fmt(e.baseline_avg_interval_hours, 1)}u → ${fmt(e.recent_avg_interval_hours, 1)}u tussen melkingen`
+                `${fmt(e.baseline_avg_interval_hours, 1)}h → ${fmt(e.recent_avg_interval_hours, 1)}h between milkings`
             );
         } else if (e.failed != null && e.total != null) {
-            parts.push(`${fmt(e.failed, 0)} van ${fmt(e.total, 0)} melkingen niet normaal afgerond`);
+            parts.push(`${fmt(e.failed, 0)} of ${fmt(e.total, 0)} milkings did not finish normally`);
         } else if (e.not_finished != null && e.feedings != null) {
-            parts.push(`${fmt(e.not_finished, 0)} van ${fmt(e.feedings, 0)} voerbeurten niet leeg`);
+            parts.push(`${fmt(e.not_finished, 0)} of ${fmt(e.feedings, 0)} feedings not emptied`);
         } else if (e.baseline_liters_per_kg != null && e.recent_liters_per_kg != null) {
             parts.push(
-                `${fmt(e.baseline_liters_per_kg, 2)} → ${fmt(e.recent_liters_per_kg, 2)} L melk per kg voer`
+                `${fmt(e.baseline_liters_per_kg, 2)} → ${fmt(e.recent_liters_per_kg, 2)} L milk per kg feed`
             );
         } else if (e.previous_speed_kg_min != null && e.latest_speed_kg_min != null) {
             parts.push(
-                `${fmt(e.previous_speed_kg_min, 2)} → ${fmt(e.latest_speed_kg_min, 2)} kg/min (rapport ${dmy(e.latest_report)})`
+                `${fmt(e.previous_speed_kg_min, 2)} → ${fmt(e.latest_speed_kg_min, 2)} kg/min (report ${dmy(e.latest_report)})`
             );
         }
         if (e.recent_days_measured != null) {
-            parts.push(`gemeten op ${e.recent_days_measured} dagen`);
+            parts.push(`measured over ${e.recent_days_measured} days`);
         } else if (e.recent_intervals_measured != null) {
-            parts.push(`${e.recent_intervals_measured} tussenpozen gemeten`);
+            parts.push(`${e.recent_intervals_measured} intervals measured`);
         }
         return parts.join(' · ');
     }
@@ -248,10 +248,10 @@
         return `${day}-${month}-${year}`;
     }
 
-    // Alle bevindingen van één analyse delen dezelfde meetperiode.
+    // All findings from one analysis share the same measurement period.
     $: insightPeriod = insights.find((i) => i.period)?.period ?? null;
-    // De vensters zijn verankerd op de nieuwste melking in de eVault, niet op
-    // de analysedatum: loopt de data achter, dan hoort dat zichtbaar te zijn.
+    // The windows are anchored on the newest milking in the eVault, not on the
+    // analysis date: if the data lags behind, that ought to be visible.
     $: insightsStaleDays =
         insightPeriod && insightsDate
             ? Math.round(
@@ -262,69 +262,69 @@
     function focusInsightCow(insight) {
         const animal = insight.scope?.animal_number;
         if (animal != null) {
-            // Filtert het hele dashboard op deze koe; de grafieken laden opnieuw.
+            // Filters the whole dashboard on this cow; the charts reload.
             selectedCows = [String(animal)];
         }
     }
 
-    // ---- Filteropties (waarden van de server, labels hier) ----
-    $: cowOptions = stats.options.cows.map((cow) => ({ value: cow, label: `Koe ${cow}` }));
+    // ---- Filter options (values from the server, labels here) ----
+    $: cowOptions = stats.options.cows.map((cow) => ({ value: cow, label: `Cow ${cow}` }));
     $: monthOptions = stats.options.months.map((month) => ({
         value: month,
         label: monthLabel(month)
     }));
     $: weekOptions = stats.options.weeks.map((week) => ({ value: week, label: weekLabel(week) }));
 
-    // ---- Kerncijfers ----
+    // ---- Key figures ----
     $: extraCards = [
         ...(stats.feed.available && stats.feed.totals.litersPerKg != null
             ? [
                   {
-                      label: 'Voerefficiëntie (L melk / kg voer)',
+                      label: 'Feed efficiency (L milk / kg feed)',
                       value: fmt(stats.feed.totals.litersPerKg, 2),
-                      sub: `over ${stats.feed.totals.overlapDays} dagen met beide metingen`
+                      sub: `over ${stats.feed.totals.overlapDays} days with both measurements`
                   }
               ]
             : []),
         ...(stats.production.available && stats.production.latest.avgSpeed != null
             ? [
                   {
-                      label: 'Gem. melksnelheid (kg/min)',
+                      label: 'Avg. milking speed (kg/min)',
                       value: fmt(stats.production.latest.avgSpeed, 2),
-                      sub: `rapport ${dmy(stats.production.latestDate)} · ${stats.production.latest.cowCount} koeien`
+                      sub: `report ${dmy(stats.production.latestDate)} · ${stats.production.latest.cowCount} cows`
                   }
               ]
             : [])
     ];
     $: statCards = [
         {
-            label: 'Aantal melkingen',
+            label: 'Number of milkings',
             value: fmt(stats.totals.count, 0),
-            sub: `${stats.totals.cowCount} koeien`
+            sub: `${stats.totals.cowCount} cows`
         },
         {
-            label: 'Totale melk (L)',
+            label: 'Total milk (L)',
             value: fmt(stats.totals.totalLiters, 0),
-            sub: 'cumulatieve opbrengst'
+            sub: 'cumulative yield'
         },
         {
-            label: 'Gem. melk per melking (L)',
+            label: 'Avg. milk per milking (L)',
             value: fmt(stats.totals.avgPerMilking, 2),
-            sub: 'efficiëntie per melkbeurt'
+            sub: 'efficiency per milking visit'
         },
         {
-            label: 'Gem. melkingen per koe per dag',
+            label: 'Avg. milkings per cow per day',
             value: fmt(stats.totals.milkingsPerCowDay, 2),
-            sub: 'frequentie per dier per dag'
+            sub: 'frequency per animal per day'
         },
         {
-            label: 'Gem. tijd tussen melkingen (uur)',
+            label: 'Avg. time between milkings (hours)',
             value: fmt(stats.totals.avgIntervalHours, 1),
-            sub: `gaten > ${stats.intervals.maxHours}u niet meegeteld`
+            sub: `gaps > ${stats.intervals.maxHours}h not counted`
         }
     ];
 
-    // ---- Grafiekdata (alleen vormgeving; cijfers komen van de server) ----
+    // ---- Chart data (styling only; the figures come from the server) ----
     const HOUR_LABELS = Array.from({ length: 24 }, (_, h) => `${h}:00`);
 
     $: hourChartData = {
@@ -332,14 +332,14 @@
         datasets: [
             {
                 type: 'bar',
-                label: 'Aantal melkingen',
+                label: 'Number of milkings',
                 data: stats.hourly.count,
                 backgroundColor: 'rgba(46, 139, 87, 0.55)',
                 yAxisID: 'y'
             },
             {
                 type: 'line',
-                label: 'Gem. melk per melking (L)',
+                label: 'Avg. milk per milking (L)',
                 data: stats.hourly.avgPerMilking,
                 borderColor: '#1d4ed8',
                 backgroundColor: '#1d4ed8',
@@ -355,14 +355,14 @@
         datasets: [
             {
                 type: 'bar',
-                label: 'Aantal melkingen',
+                label: 'Number of milkings',
                 data: stats.weekday.count,
                 backgroundColor: 'rgba(46, 139, 87, 0.55)',
                 yAxisID: 'y'
             },
             {
                 type: 'line',
-                label: 'Totale melk (L)',
+                label: 'Total milk (L)',
                 data: stats.weekday.totalLiters,
                 borderColor: '#1d4ed8',
                 backgroundColor: '#1d4ed8',
@@ -378,14 +378,14 @@
         datasets: [
             {
                 type: 'bar',
-                label: 'Totale melk per uur (L)',
+                label: 'Total milk per hour (L)',
                 data: stats.hourly.totalLiters,
                 backgroundColor: 'rgba(29, 78, 216, 0.5)',
                 yAxisID: 'y'
             },
             {
                 type: 'line',
-                label: 'Cumulatief dagverloop (L)',
+                label: 'Cumulative daily curve (L)',
                 data: stats.hourly.cumulative,
                 borderColor: '#e69500',
                 backgroundColor: '#e69500',
@@ -398,11 +398,11 @@
 
     $: intervalDistData = {
         labels: stats.intervals.bins.map(
-            (_, i) => `${i * stats.intervals.binHours}–${(i + 1) * stats.intervals.binHours}u`
+            (_, i) => `${i * stats.intervals.binHours}–${(i + 1) * stats.intervals.binHours}h`
         ),
         datasets: [
             {
-                label: 'Aantal intervallen',
+                label: 'Number of intervals',
                 data: stats.intervals.bins,
                 backgroundColor: 'rgba(46, 139, 87, 0.55)'
             }
@@ -410,10 +410,10 @@
     };
 
     $: intervalRankData = {
-        labels: stats.intervals.perCowTop.map((e) => `Koe ${e.animal}`),
+        labels: stats.intervals.perCowTop.map((e) => `Cow ${e.animal}`),
         datasets: [
             {
-                label: 'Gem. tijd tussen melkingen (uur)',
+                label: 'Avg. time between milkings (hours)',
                 data: stats.intervals.perCowTop.map((e) => e.avg),
                 backgroundColor: 'rgba(192, 57, 43, 0.55)'
             }
@@ -425,7 +425,7 @@
         datasets: [
             {
                 type: 'line',
-                label: 'Totale melk per dag (L)',
+                label: 'Total milk per day (L)',
                 data: stats.dailyTrend.liters,
                 borderColor: '#2e8b57',
                 backgroundColor: 'rgba(46, 139, 87, 0.15)',
@@ -436,7 +436,7 @@
             },
             {
                 type: 'line',
-                label: 'Aantal melkingen per dag',
+                label: 'Milkings per day',
                 data: stats.dailyTrend.counts,
                 borderColor: '#1d4ed8',
                 backgroundColor: '#1d4ed8',
@@ -461,13 +461,13 @@
         labels: stats.weekly.labels,
         datasets: [
             {
-                label: 'Aantal melkingen',
+                label: 'Number of milkings',
                 data: stats.weekly.counts,
                 backgroundColor: 'rgba(46, 139, 87, 0.55)',
                 yAxisID: 'y'
             },
             {
-                label: 'Totale melk (L)',
+                label: 'Total milk (L)',
                 data: stats.weekly.liters,
                 backgroundColor: 'rgba(29, 78, 216, 0.5)',
                 yAxisID: 'y1'
@@ -475,21 +475,21 @@
         ]
     };
 
-    // ---- Voer × melk (server joint op dag; zelfde filters als de rest) ----
+    // ---- Feed × milk (server joins on day; same filters as the rest) ----
     $: feedMilkChartData = stats.feed.available
         ? {
               labels: stats.feed.dailyTrend.labels,
               datasets: [
                   {
                       type: 'bar',
-                      label: 'Voergift per dag (kg)',
+                      label: 'Feed given per day (kg)',
                       data: stats.feed.dailyTrend.feedKg,
                       backgroundColor: 'rgba(180, 83, 9, 0.45)',
                       yAxisID: 'y'
                   },
                   {
                       type: 'line',
-                      label: 'Melkgift per dag (L)',
+                      label: 'Milk yield per day (L)',
                       data: stats.feed.dailyTrend.milkLiters,
                       borderColor: '#2e8b57',
                       backgroundColor: '#2e8b57',
@@ -508,7 +508,7 @@
               datasets: [
                   {
                       type: 'line',
-                      label: 'Efficiëntie (L melk per kg voer)',
+                      label: 'Efficiency (L milk per kg feed)',
                       data: stats.feed.dailyTrend.efficiency,
                       borderColor: '#1d4ed8',
                       backgroundColor: '#1d4ed8',
@@ -519,7 +519,7 @@
                   },
                   {
                       type: 'line',
-                      label: 'Restvoer (% voerbeurten niet leeg)',
+                      label: 'Leftover feed (% of feedings not emptied)',
                       data: stats.feed.dailyTrend.leftoverPct,
                       borderColor: '#c0392b',
                       backgroundColor: '#c0392b',
@@ -534,10 +534,10 @@
 
     $: leftoversChartData = stats.feed.available
         ? {
-              labels: stats.feed.leftovers.topCows.map((c) => `Koe ${c.animal}`),
+              labels: stats.feed.leftovers.topCows.map((c) => `Cow ${c.animal}`),
               datasets: [
                   {
-                      label: 'Voerbeurten niet leeggegeten',
+                      label: 'Feedings not eaten up',
                       data: stats.feed.leftovers.topCows.map((c) => c.notFinished),
                       backgroundColor: 'rgba(192, 57, 43, 0.55)'
                   }
@@ -545,12 +545,12 @@
           }
         : null;
 
-    // ---- Productie-snapshots (melksnelheid is robot-authoritatief) ----
+    // ---- Production snapshots (milking speed is robot-authoritative) ----
     $: speedScatterData = stats.production.available
         ? {
               datasets: [
                   {
-                      label: 'Koe (nieuwste rapport)',
+                      label: 'Cow (newest report)',
                       data: stats.production.points
                           .filter((p) => p.speed != null && p.milk24 != null)
                           .map((p) => ({ x: p.speed, y: p.milk24, animal: p.animal })),
@@ -564,7 +564,7 @@
         ? {
               datasets: [
                   {
-                      label: 'Koe (nieuwste rapport)',
+                      label: 'Cow (newest report)',
                       data: stats.production.points
                           .filter((p) => p.lactationDays != null && p.milk24 != null)
                           .map((p) => ({ x: p.lactationDays, y: p.milk24, animal: p.animal })),
@@ -574,7 +574,7 @@
           }
         : null;
 
-    // ---- Chartopties ----
+    // ---- Chart options ----
     const baseOptions = {
         responsive: true,
         maintainAspectRatio: false,
@@ -607,7 +607,7 @@
     const rankOptions = {
         ...baseOptions,
         indexAxis: 'y',
-        scales: { x: { beginAtZero: true, title: { display: true, text: 'Uren' } } }
+        scales: { x: { beginAtZero: true, title: { display: true, text: 'Hours' } } }
     };
 
     const leftoverRankOptions = {
@@ -617,7 +617,7 @@
             x: {
                 beginAtZero: true,
                 ticks: { precision: 0 },
-                title: { display: true, text: 'Voerbeurten niet leeg' }
+                title: { display: true, text: 'Feedings not emptied' }
             }
         }
     };
@@ -630,7 +630,7 @@
             tooltip: {
                 callbacks: {
                     label: (ctx) =>
-                        ` Koe ${ctx.raw.animal}: ${ctx.parsed.x} ${xTitle}, ${ctx.parsed.y} ${yTitle}`
+                        ` Cow ${ctx.raw.animal}: ${ctx.parsed.x} ${xTitle}, ${ctx.parsed.y} ${yTitle}`
                 }
             }
         },
@@ -660,20 +660,20 @@
 
 <main>
     <header>
-        <h1>Melkrobot Monitor</h1>
+        <h1>Milking Robot Monitor</h1>
         <div class="header-status">
             <button type="button" class="refresh" on:click={load} disabled={loading}>
-                {loading ? 'Bezig…' : 'Ververs nu'}
+                {loading ? 'Working…' : 'Refresh now'}
             </button>
             <span class="updated">
-                Bijgewerkt: {clockLabel(lastUpdated)}
+                Updated: {clockLabel(lastUpdated)}
                 {#if lastChecked && lastChecked !== lastUpdated}
-                    · gecontroleerd: {clockLabel(lastChecked)}
+                    · checked: {clockLabel(lastChecked)}
                 {/if}
             </span>
             {#if progress && progress.complete === false}
                 <span class="progress">
-                    eVault laden: {fmt(progress.loaded ?? 0, 0)} records binnen…
+                    Loading eVault: {fmt(progress.loaded ?? 0, 0)} records in…
                 </span>
             {/if}
             {#if loadError}
@@ -684,37 +684,37 @@
 
     <section class="filters card">
         <MultiSelect
-            label="Koeien"
+            label="Cows"
             options={cowOptions}
             bind:selected={selectedCows}
-            allLabel="Alle koeien"
+            allLabel="All cows"
             searchable
         />
         <MultiSelect
-            label="Maanden"
+            label="Months"
             options={monthOptions}
             bind:selected={selectedMonths}
-            allLabel="Alle maanden"
+            allLabel="All months"
         />
         <MultiSelect
-            label="Weken"
+            label="Weeks"
             options={weekOptions}
             bind:selected={selectedWeeks}
-            allLabel="Alle weken"
+            allLabel="All weeks"
             searchable
         />
         <div class="filter-group">
-            <label for="from">Datumbereik</label>
+            <label for="from">Date range</label>
             <div class="date-row">
                 <input id="from" type="date" bind:value={dateFrom} />
-                <span>t/m</span>
+                <span>to</span>
                 <input type="date" bind:value={dateTo} />
             </div>
         </div>
         <div class="filter-group filter-footer">
-            <button type="button" class="reset" on:click={resetFilters}>Alle filters wissen</button>
+            <button type="button" class="reset" on:click={resetFilters}>Clear all filters</button>
             <p class="filter-info">
-                {fmt(stats.filtered.count, 0)} van {fmt(stats.filtered.of, 0)} melkingen geselecteerd
+                {fmt(stats.filtered.count, 0)} of {fmt(stats.filtered.of, 0)} milkings selected
             </p>
         </div>
     </section>
@@ -724,22 +724,22 @@
             {#if insights.length}
                 <div class="card wide">
                     <div class="insights-head">
-                        <h3>AI-bevindingen</h3>
+                        <h3>Data2Decision ai-driven</h3>
                         <span class="insights-meta">
-                            analyse van {dmy(insightsDate)} · {insights.length} bevindingen
+                            analysis of {dmy(insightsDate)} · {insights.length} findings
                             {#if insightPeriod}
-                                · meetperiode {dmy(insightPeriod.data_from)} t/m {dmy(
+                                · measurement period {dmy(insightPeriod.data_from)} to {dmy(
                                     insightPeriod.data_until
-                                )}, vergeleken met {dmy(insightPeriod.baseline_from)} t/m {dmy(
+                                )}, compared with {dmy(insightPeriod.baseline_from)} to {dmy(
                                     insightPeriod.data_from
                                 )}
                             {/if}
                         </span>
                         {#if insightsStaleDays > 2}
                             <span class="insights-stale">
-                                ⚠ nieuwste melking in de eVault is van {dmy(
+                                ⚠ newest milking in the eVault is from {dmy(
                                     insightPeriod.data_until
-                                )} — de data loopt {insightsStaleDays} dagen achter
+                                )} — the data is {insightsStaleDays} days behind
                             </span>
                         {/if}
                     </div>
@@ -748,17 +748,17 @@
                             <li class="insight {insight.severity}">
                                 <div class="insight-top">
                                     <span class="insight-badge {insight.severity}">
-                                        {insight.severity === 'high' ? 'Hoog' : 'Let op'}
+                                        {insight.severity === 'high' ? 'High' : 'Note'}
                                     </span>
                                     <span class="insight-kind">{insightTypeLabel(insight)}</span>
                                     {#if insight.scope?.animal_number != null}
                                         <button
                                             type="button"
                                             class="cow-link"
-                                            title="Filter het dashboard op deze koe"
+                                            title="Filter the dashboard on this cow"
                                             on:click={() => focusInsightCow(insight)}
                                         >
-                                            koe {insight.scope.animal_number} →
+                                            cow {insight.scope.animal_number} →
                                         </button>
                                     {/if}
                                 </div>
@@ -785,98 +785,98 @@
             {/if}
 
             <div class="card wide">
-                <h3>Heatmap: aantal melkingen per uur en dag</h3>
-                <Heatmap matrix={stats.heatmaps.count} unit="melkingen" decimals={0} />
+                <h3>Heatmap: number of milkings per hour and day</h3>
+                <Heatmap matrix={stats.heatmaps.count} unit="milkings" decimals={0} />
             </div>
             <div class="card wide">
-                <h3>Heatmap: gemiddelde melk (L) per uur en dag</h3>
+                <h3>Heatmap: average milk (L) per hour and day</h3>
                 <Heatmap matrix={stats.heatmaps.avgLiters} unit="L" decimals={1} />
             </div>
 
             <div class="card">
-                <h3>Melkingen per uur van de dag</h3>
+                <h3>Milkings per hour of the day</h3>
                 <div class="chart">
-                    <ChartBox type="bar" data={hourChartData} options={dualAxis('Aantal', 'Liters')} />
+                    <ChartBox type="bar" data={hourChartData} options={dualAxis('Count', 'Liters')} />
                 </div>
             </div>
             <div class="card">
-                <h3>Melkingen per dag van de week</h3>
+                <h3>Milkings per day of the week</h3>
                 <div class="chart">
-                    <ChartBox type="bar" data={dayChartData} options={dualAxis('Aantal', 'Liters')} />
+                    <ChartBox type="bar" data={dayChartData} options={dualAxis('Count', 'Liters')} />
                 </div>
             </div>
 
             <div class="card">
-                <h3>Totale productie per uur + cumulatief verloop</h3>
+                <h3>Total production per hour + cumulative curve</h3>
                 <div class="chart">
                     <ChartBox
                         type="bar"
                         data={productionChartData}
-                        options={dualAxis('Liters per uur', 'Cumulatief (L)')}
+                        options={dualAxis('Liters per hour', 'Cumulative (L)')}
                     />
                 </div>
             </div>
             <div class="card">
-                <h3>Trend: dagopbrengst vs. aantal melkingen</h3>
+                <h3>Trend: daily yield vs. number of milkings</h3>
                 <div class="chart">
-                    <ChartBox type="line" data={trendChartData} options={dualAxis('Liters', 'Aantal')} />
+                    <ChartBox type="line" data={trendChartData} options={dualAxis('Liters', 'Count')} />
                 </div>
             </div>
 
             <div class="card">
-                <h3>Verdeling tijd tussen melkingen</h3>
+                <h3>Distribution of time between milkings</h3>
                 <div class="chart">
                     <ChartBox
                         type="bar"
                         data={intervalDistData}
-                        options={singleAxis('Aantal intervallen')}
+                        options={singleAxis('Number of intervals')}
                     />
                 </div>
             </div>
             <div class="card">
-                <h3>Langste gem. tijd tussen melkingen per koe (top 15)</h3>
+                <h3>Longest avg. time between milkings per cow (top 15)</h3>
                 <div class="chart">
                     <ChartBox type="bar" data={intervalRankData} options={rankOptions} />
                 </div>
             </div>
 
             <div class="card">
-                <h3>Status van melkingen</h3>
+                <h3>Milking status</h3>
                 <div class="chart donut">
                     <ChartBox type="doughnut" data={statusChartData} options={donutOptions} />
                 </div>
             </div>
             <div class="card">
-                <h3>Weekvergelijking</h3>
+                <h3>Week comparison</h3>
                 <div class="chart">
-                    <ChartBox type="bar" data={weekChartData} options={dualAxis('Aantal', 'Liters')} />
+                    <ChartBox type="bar" data={weekChartData} options={dualAxis('Count', 'Liters')} />
                 </div>
             </div>
 
             {#if stats.feed.available}
                 <div class="card wide">
-                    <h3>Voergift vs. melkgift per dag</h3>
+                    <h3>Feed given vs. milk yield per day</h3>
                     <div class="chart">
                         <ChartBox
                             type="bar"
                             data={feedMilkChartData}
-                            options={dualAxis('Voer (kg)', 'Melk (L)')}
+                            options={dualAxis('Feed (kg)', 'Milk (L)')}
                         />
                     </div>
                 </div>
 
                 <div class="card">
-                    <h3>Voerefficiëntie & restvoer per dag</h3>
+                    <h3>Feed efficiency & leftover feed per day</h3>
                     <div class="chart">
                         <ChartBox
                             type="line"
                             data={efficiencyChartData}
-                            options={dualAxis('L melk / kg voer', 'Restvoer %')}
+                            options={dualAxis('L milk / kg feed', 'Leftover feed %')}
                         />
                     </div>
                 </div>
                 <div class="card">
-                    <h3>Restvoer per koe (mogelijk vroeg ziektesignaal)</h3>
+                    <h3>Leftover feed per cow (possible early illness signal)</h3>
                     <div class="chart">
                         <ChartBox
                             type="bar"
@@ -890,40 +890,40 @@
             {#if stats.production.available}
                 <div class="card">
                     <h3>
-                        Melksnelheid vs. dagproductie per koe (rapport
+                        Milking speed vs. daily production per cow (report
                         {dmy(stats.production.latestDate)})
                     </h3>
                     <div class="chart">
                         <ChartBox
                             type="scatter"
                             data={speedScatterData}
-                            options={scatterOptions('kg/min', 'kg per 24u')}
+                            options={scatterOptions('kg/min', 'kg per 24h')}
                         />
                     </div>
                 </div>
                 <div class="card">
-                    <h3>Lactatiecurve: dagen in lactatie vs. dagproductie</h3>
+                    <h3>Lactation curve: days in lactation vs. daily production</h3>
                     <div class="chart">
                         <ChartBox
                             type="scatter"
                             data={lactationScatterData}
-                            options={scatterOptions('dagen in lactatie', 'kg per 24u')}
+                            options={scatterOptions('days in lactation', 'kg per 24h')}
                         />
                     </div>
                 </div>
             {/if}
 
             <div class="card wide">
-                <h3>Recente melkingen</h3>
+                <h3>Recent milkings</h3>
                 <div class="table-wrapper">
                     <table>
                         <thead>
                             <tr>
-                                <th>Tijdstip</th>
-                                <th>Koe</th>
+                                <th>Time</th>
+                                <th>Cow</th>
                                 <th>Liters</th>
                                 <th>Status</th>
-                                <th>Tijd sinds vorige melking</th>
+                                <th>Time since previous milking</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -937,7 +937,7 @@
                                     </td>
                                     <td>
                                         {record.intervalHours != null
-                                            ? `${fmt(record.intervalHours, 1)} uur`
+                                            ? `${fmt(record.intervalHours, 1)} hours`
                                             : '–'}
                                     </td>
                                 </tr>

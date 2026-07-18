@@ -1,8 +1,8 @@
 <script>
     export let label;
     export let options = []; // [{ value, label }]
-    export let selected = []; // bind: geselecteerde values, leeg = alles
-    export let allLabel = 'Alles';
+    export let selected = []; // bind: selected values, empty = all
+    export let allLabel = 'All';
     export let searchable = false;
 
     let open = false;
@@ -19,7 +19,7 @@
             ? allLabel
             : selected.length === 1
               ? options.find((o) => o.value === selected[0])?.label ?? selected[0]
-              : `${selected.length} geselecteerd`;
+              : `${selected.length} selected`;
 
     function toggle(value) {
         selected = selected.includes(value)
@@ -50,7 +50,7 @@
     {#if open}
         <div class="panel">
             {#if searchable}
-                <input class="search" type="text" placeholder="Zoeken…" bind:value={search} />
+                <input class="search" type="text" placeholder="Search…" bind:value={search} />
             {/if}
             <button type="button" class="clear" on:click={clear} disabled={selected.length === 0}>
                 {allLabel}
@@ -66,7 +66,7 @@
                         <span>{option.label}</span>
                     </label>
                 {:else}
-                    <p class="empty">Geen resultaten</p>
+                    <p class="empty">No results</p>
                 {/each}
             </div>
         </div>

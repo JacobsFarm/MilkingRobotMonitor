@@ -3,13 +3,13 @@ import { createHash } from 'node:crypto';
 import { loadSettings } from '$lib/server/settings.js';
 import { fetchAll } from '$lib/server/vault.js';
 
-// Lichte server-cache: meerdere pollers of tabbladen trekken zo niet elk de
-// volledige eVault leeg. De TTL is kort t.o.v. het ververs-interval van de client.
+// Light server cache: this stops several pollers or tabs from each draining the
+// full eVault. The TTL is short relative to the client's refresh interval.
 let cache = { at: 0, records: null, signature: null };
 
-// Vingerafdruk van de dataset op basis van de aanwezige record-id's. Verandert
-// zodra er een melking bijkomt of verdwijnt; melkingen zijn onveranderlijke
-// gebeurtenissen dus wijzigingen-in-plaats komen niet voor.
+// Fingerprint of the dataset based on the record ids present. Changes as soon
+// as a milking is added or disappears; milkings are immutable events, so
+// in-place changes do not occur.
 function signatureOf(records) {
     const ids = records
         .map((record) => record.id)
@@ -35,8 +35,8 @@ export async function GET({ url }) {
         fetched_at: new Date(cache.at).toISOString()
     };
 
-    // Client heeft al exact deze dataset: sla de payload over, scheelt transfer
-    // én een volledige herberekening in de browser.
+    // Client already has exactly this dataset: skip the payload, which saves
+    // transfer as well as a full recalculation in the browser.
     const clientSignature = url.searchParams.get('sig');
     if (clientSignature && clientSignature === cache.signature) {
         return json({ ...base, unchanged: true, records: [] });

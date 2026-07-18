@@ -3,16 +3,16 @@ import { loadSettings } from '$lib/server/settings.js';
 import { collectionStatus } from '$lib/server/vault.js';
 import { getMilkingStats, normalizeFilters } from '$lib/server/aggregate.js';
 
-// Statistieken-API: de browser stuurt zijn filters als query-parameters en
-// krijgt kant-en-klare aggregaten terug (berekend en gememoized op de server).
-// Met `sig` (de vorige signature) antwoordt de server `unchanged: true` zonder
-// payload zolang dataset én filters gelijk bleven.
+// Statistics API: the browser sends its filters as query parameters and gets
+// ready-made aggregates back (computed and memoized on the server). With `sig`
+// (the previous signature) the server answers `unchanged: true` without a
+// payload for as long as dataset and filters stayed the same.
 export async function GET({ url }) {
     const settings = loadSettings();
     const filters = normalizeFilters(url.searchParams);
     const { signature, stats } = await getMilkingStats(settings, filters);
 
-    // Laadvoortgang over alle collecties samen, voor de UI-banner.
+    // Load progress across all collections together, for the UI banner.
     const statuses = [
         settings.base_path ?? 'milking_controle_data',
         settings.feed_path ?? 'feed_distribution_data',

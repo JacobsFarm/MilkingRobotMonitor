@@ -1,7 +1,7 @@
 <script>
     import { DAY_LABELS, fmt } from '$lib/format.js';
 
-    export let matrix; // 7 rijen (Ma..Zo) x 24 kolommen (0..23), null = geen data
+    export let matrix; // 7 rows (Mon..Sun) x 24 columns (0..23), null = no data
     export let unit = '';
     export let decimals = 0;
 
@@ -12,7 +12,7 @@
             return '#f1f3f6';
         }
         const t = value / maxValue;
-        // van lichtgroen naar donkergroen
+        // from light green to dark green
         const from = [232, 245, 238];
         const to = [23, 94, 56];
         const rgb = from.map((f, i) => Math.round(f + (to[i] - f) * t));
@@ -38,7 +38,7 @@
             <div
                 class="cell"
                 style="background: {cellColor(value)}; color: {textColor(value)}"
-                title={value == null ? 'Geen melkingen' : `${day} — ${fmt(value, decimals)} ${unit}`}
+                title={value == null ? 'No milkings' : `${day} — ${fmt(value, decimals)} ${unit}`}
             >
                 {value == null ? '' : fmt(value, decimals)}
             </div>
