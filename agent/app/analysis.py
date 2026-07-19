@@ -34,6 +34,15 @@ FEED_EFFICIENCY_THRESHOLD = 0.10
 FEED_EFFICIENCY_MIN_DAYS = 3
 # Milking speed drop between the two most recent production reports.
 SPEED_DROP_THRESHOLD = 0.15
+# A cow flagged by this many *different* analyses at once is reported as one
+# combined signal (see correlation_findings).
+MULTI_SIGNAL_MIN_KINDS = 2
+# Recovery: the dip window must have been at least this far below baseline...
+RECOVERY_DIP_THRESHOLD = 0.15
+# ...and the recent window back within this margin of baseline to count as
+# recovered. Deliberately tighter than the dip threshold: "less bad" is not
+# the same news as "back to normal".
+RECOVERY_MARGIN = 0.05
 
 
 def liters_of(record, divisor):
@@ -418,6 +427,156 @@ def production_speed_findings(production_records):
     return findings
 
 
+def cow_recovery_findings(rows, recent_days, baseline_days):
+    """Cows that dipped and are back at their own baseline -- good news.
+
+    Not every insight should be an alarm. A cow that produced clearly less for
+    a while and has returned to her own level is worth reporting for two
+    reasons: it closes the loop on an earlier cow_yield_drop (the farmer who
+    intervened learns it worked), and a recovery the farmer did NOT act on is
+    still useful ("she sorted it out herself, but keep half an eye on her").
+
+    Timeline, anchored on the newest record like everything else:
+        baseline (baseline_days) -> dip window (recent_days) -> recent (recent_days)
+    Recovered = the dip window sat >= RECOVERY_DIP_THRESHOLD below baseline AND
+    the recent window is back within RECOVERY_MARGIN of baseline. The baseline
+    ends *before* the dip so the dip cannot drag its own reference down.
+
+    Yield is the metric today because it is the metric we have milking-level
+    history for. The same shape applies verbatim to any per-visit measurement a
+    future source adds (conductivity being the obvious one) -- that would be a
+    second call to this function with different rows, not new logic.
+    """
+    if not rows:
+        return []
+    latest = rows[-1]["timestamp"]
+    recent_start = latest - timedelta(days=recent_days)
+    dip_start = recent_start - timedelta(days=recent_days)
+    baseline_start = dip_start - timedelta(days=baseline_days)
+
+    recent = [r for r in rows if r["timestamp"] > recent_start]
+    dip = [r for r in rows if dip_start < r["timestamp"] <= recent_start]
+    baseline = [r for r in rows if baseline_start < r["timestamp"] <= dip_start]
+
+    recent_by_cow = _liters_per_cow_day(recent)
+    dip_by_cow = _liters_per_cow_day(dip)
+    baseline_by_cow = _liters_per_cow_day(baseline)
+
+    candidates = []
+    for animal, baseline_days_liters in baseline_by_cow.items():
+        recent_days_liters = recent_by_cow.get(animal, [])
+        dip_days_liters = dip_by_cow.get(animal, [])
+        if (
+            len(recent_days_liters) < MIN_MILKINGS_PER_WINDOW
+            or len(dip_days_liters) < MIN_MILKINGS_PER_WINDOW
+            or len(baseline_days_liters) < MIN_MILKINGS_PER_WINDOW
+        ):
+            continue
+        baseline_avg = _mean(baseline_days_liters)
+        dip_avg = _mean(dip_days_liters)
+        recent_avg = _mean(recent_days_liters)
+        dip_change = _change(dip_avg, baseline_avg)
+        recent_change = _change(recent_avg, baseline_avg)
+        if dip_change is None or recent_change is None:
+            continue
+        if dip_change <= -RECOVERY_DIP_THRESHOLD and abs(recent_change) <= RECOVERY_MARGIN:
+            candidates.append((abs(dip_change), animal, baseline_avg, dip_avg, recent_avg, dip_change))
+
+    candidates.sort(reverse=True)
+    findings = []
+    for _, animal, baseline_avg, dip_avg, recent_avg, dip_change in (
+        candidates[:MAX_FINDINGS_PER_KIND]
+    ):
+        findings.append(
+            _finding(
+                "cow_recovered",
+                "medium",
+                {"animal_number": animal},
+                f"Cow {animal}: back at her own level after a dip -- "
+                f"{baseline_avg:.1f} -> {dip_avg:.1f} -> {recent_avg:.1f} L/day.",
+                {
+                    "baseline_liters_per_day": round(baseline_avg, 1),
+                    "dip_liters_per_day": round(dip_avg, 1),
+                    "recent_liters_per_day": round(recent_avg, 1),
+                    "dip_pct": round(dip_change * 100, 1),
+                },
+            )
+        )
+    return findings
+
+
+# Signals that each, on their own, mean "something may be wrong with this cow".
+# A rise in yield is deliberately not here: it is good news, and pairing it with
+# a concern would describe a cow that is both improving and deteriorating.
+CONCERNING_KINDS = (
+    "cow_yield_drop",
+    "cow_interval_rise",
+    "cow_feed_left",
+    "cow_speed_drop",
+)
+
+
+def correlation_findings(findings):
+    """Cows that several independent analyses flagged at the same time.
+
+    This is the pattern a farmer most easily misses, and the reason it is worth
+    computing separately. Every other finding compares one quantity against one
+    threshold, so a cow drifting downhill on several fronts at once shows up as
+    two or three *unremarkable* entries -- each just over its threshold, each
+    scattered among dozens of others in the list. Nothing in a per-quantity
+    report ever says "these are the same animal".
+
+    The signals are also not independent in reality: fewer robot visits, feed
+    left uneaten and a slower milking are the textbook early course of lameness
+    or mastitis, in roughly that order. Seeing them coincide is far stronger
+    evidence than any single one of them crossing its threshold.
+
+    Derived purely from findings that already exist, so it stays subject to the
+    same rule as everything else here: the numbers come from the analyses above,
+    this only reports which of them landed on the same cow.
+    """
+    by_animal = {}
+    for finding in findings:
+        animal = finding["scope"].get("animal_number")
+        if animal is None or finding["kind"] not in CONCERNING_KINDS:
+            continue
+        by_animal.setdefault(animal, []).append(finding)
+
+    candidates = []
+    for animal, group in by_animal.items():
+        kinds = sorted({f["kind"] for f in group})
+        if len(kinds) >= MULTI_SIGNAL_MIN_KINDS:
+            candidates.append((len(kinds), animal, group, kinds))
+    # Most signals first: that is the ranking by concern.
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+
+    results = []
+    for count, animal, group, kinds in candidates[:MAX_FINDINGS_PER_KIND]:
+        severity = (
+            "high"
+            if count >= 3 or any(f["severity"] == "high" for f in group)
+            else "medium"
+        )
+        results.append(
+            _finding(
+                "cow_multi_signal",
+                severity,
+                {"animal_number": animal},
+                f"Cow {animal}: {count} independent signals at once "
+                f"({', '.join(kinds)}) -- the clearest reason in this report to "
+                f"go and look at her.",
+                {
+                    "signals": kinds,
+                    "signal_count": count,
+                    # The underlying figures travel along, so this insight is
+                    # auditable on its own without joining the other records.
+                    "per_signal": {f["kind"]: f["metrics"] for f in group},
+                },
+            )
+        )
+    return results
+
+
 def build_findings(
     records,
     divisor,
@@ -436,6 +595,7 @@ def build_findings(
     findings.extend(herd_findings(recent, baseline))
     findings.extend(cow_yield_findings(recent, baseline))
     findings.extend(cow_interval_findings(recent, baseline))
+    findings.extend(cow_recovery_findings(rows, recent_days, baseline_days))
 
     # Cross-dataset findings: feed and production data joined against the same
     # windows (anchored on the newest milking, so all findings describe the
@@ -451,6 +611,10 @@ def build_findings(
         findings.extend(feed_findings(feed_recent, feed_baseline, recent, baseline))
     if production_records:
         findings.extend(production_speed_findings(production_records))
+
+    # Last, because it reads the findings above rather than the records. Built
+    # into its own list first: extending a list from itself would loop.
+    findings.extend(correlation_findings(findings))
 
     # The windows are anchored on the newest record, not on today: if the
     # uploader falls behind, "recent" is genuinely older than it sounds.

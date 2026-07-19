@@ -1,0 +1,68 @@
+/*
+ * CowCatcher AI house style, lifted from the palette the project's own site
+ * ships (jacobsfarm.github.io/website): barn green as the frame, gold as the
+ * single accent, near-black green for the footer, and a barely-tinted white
+ * as the page. Bebas for anything that shouts, Roboto for anything you read.
+ *
+ * Everything downstream uses these variables, so re-skinning the chatbot is a
+ * matter of editing this file only.
+ */
+
+:root {
+    --cc-green: #386938;
+    --cc-green-dark: #335735;
+    --cc-green-deep: #2c3e2c;
+    --cc-ink: #151d15;
+    --cc-ink-soft: #151d158c;
+    --cc-gold: #bf8100;
+    --cc-teal: #2b9191;
+
+    --cc-page: #f6f9f6;
+    --cc-page-alt: #f9fbf9;
+    --cc-surface: #ffffff;
+    --cc-border: #cad0ca;
+
+    --cc-shadow: 0 2px 8px #00000026;
+    --cc-shadow-soft: 0 1px 3px #0000000d;
+
+    --cc-radius: 12px;
+    --cc-radius-lg: 16px;
+    --cc-radius-pill: 50px;
+
+    --cc-display: 'Bebas Neue', 'Bebas Kai', Impact, sans-serif;
+    --cc-body: Roboto, system-ui, 'Segoe UI', sans-serif;
+    --cc-mono: 'Cascadia Mono', Consolas, 'SF Mono', ui-monospace, monospace;
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    height: 100%;
+}
+
+body {
+    margin: 0;
+    background: var(--cc-page);
+    color: var(--cc-ink);
+    font-family: var(--cc-body);
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Bebas has no lowercase; uppercasing keeps the fallback faces consistent
+   with it instead of switching between two different-looking headings. */
+.cc-display {
+    font-family: var(--cc-display);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 400;
+}
+
+:focus-visible {
+    outline: 2px solid var(--cc-gold);
+    outline-offset: 2px;
+}

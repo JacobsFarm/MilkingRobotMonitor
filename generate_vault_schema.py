@@ -34,20 +34,27 @@ AGENT_EXAMPLE = REPO_ROOT / "agent" / "config" / "settings.example.json"
 OUTPUT_PATH = REPO_ROOT / "VAULT_SCHEMA.json"
 
 # Which programs read a collection isn't introspectable from the writers alone.
+# The chatbot reads every active collection by design: it builds its view of
+# the vault from this very file, so a new collection is queryable through it
+# the moment the schema is regenerated.
+CHATBOT_READER = "chatbot (ad-hoc questions over any collection, schema-driven)"
 KNOWN_READERS = {
     "milking_controle_data": [
         "dashboard (/api/records, /api/stats)",
         "agent (analyses it, writes milking_insights)",
+        CHATBOT_READER,
     ],
     "feed_distribution_data": [
         "dashboard (/api/stats: feed x milk join, efficiency, leftovers)",
         "agent (cow_feed_left, herd_feed_efficiency_change findings)",
+        CHATBOT_READER,
     ],
     "milking_production_data": [
         "dashboard (/api/stats: speed/lactation scatter)",
-        "agent (cow_speed_drop findings)",
+        "agent (cow_speed_drop findings, lactation data)",
+        CHATBOT_READER,
     ],
-    "milking_insights": ["dashboard (/api/insights)"],
+    "milking_insights": ["dashboard (/api/insights)", CHATBOT_READER],
 }
 
 # Collections that are part of the design but have no writer yet. Documented so

@@ -52,6 +52,15 @@ RECORD_SCHEMA = {
             "cow_feed_left": "one cow repeatedly leaves feed uneaten (early illness signal)",
             "herd_feed_efficiency_change": "liters of milk per kg of feed moved vs baseline",
             "cow_speed_drop": "one cow's milking speed dropped between production reports",
+            "cow_multi_signal": (
+                "several independent analyses flagged the SAME cow in the same "
+                "period -- the pattern most easily missed when scanning a list "
+                "of single-quantity findings"
+            ),
+            "cow_recovered": (
+                "one cow dipped clearly below her own baseline and is back at "
+                "her level -- positive: closes the loop on an earlier drop"
+            ),
         },
         "example": "cow_yield_drop",
     },

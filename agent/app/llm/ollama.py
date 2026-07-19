@@ -8,24 +8,56 @@ computes. Gemma is a good fit here because the agent never asks the model to
 call tools -- it only asks it to interpret findings that Python already
 calculated. (For agentic tool-calling loops, models trained for it such as
 Qwen 2.5 or Llama 3.1+ are the safer pick.)
+
+One caveat when running a reasoning model such as qwen3: its thinking tokens are
+generated inside the same window and before the JSON, so with `format: json` it
+can spend the budget reasoning and return a truncated object. Either use an
+instruct variant, disable thinking, or give it a generous num_ctx.
 """
 
 import json
+import logging
 import urllib.error
 import urllib.request
 
 from app.llm.base import LLMClient, LLMError
 
+logger = logging.getLogger("agent.llm")
+
+# Rough characters-per-token ratio, only used to warn before a prompt silently
+# overflows the context window. Deliberately pessimistic: JSON with many digits
+# and field names tokenizes worse than prose.
+CHARS_PER_TOKEN = 3
+# Leave room for the reply inside num_ctx -- Ollama counts prompt and response
+# against the same window.
+RESPONSE_HEADROOM_TOKENS = 1024
+
 
 class OllamaClient(LLMClient):
 
-    def __init__(self, host, model, temperature=0.2, timeout_seconds=180):
+    def __init__(
+        self,
+        host,
+        model,
+        temperature=0.2,
+        timeout_seconds=180,
+        num_ctx=16384,
+        num_predict=None,
+    ):
         self.host = host.rstrip("/")
         self.model = model
         # Low temperature: this is analysis, not creative writing -- we want
         # the same numbers to yield the same conclusions.
         self.temperature = temperature
         self.timeout_seconds = timeout_seconds
+        # Ollama's own default context window is small (4k on current builds)
+        # and it truncates the prompt to fit WITHOUT reporting it. With a few
+        # dozen findings that silently drops the tail of the batch: the model
+        # answers about the findings it still saw, the rest fall back to their
+        # machine-written summary, and nothing anywhere says why. So we always
+        # send an explicit value rather than inheriting the default.
+        self.num_ctx = num_ctx
+        self.num_predict = num_predict
 
     def name(self):
         return f"ollama:{self.model}"
@@ -37,7 +69,23 @@ class OllamaClient(LLMClient):
         except (urllib.error.URLError, OSError):
             return False
 
+    def _warn_if_prompt_is_large(self, system_prompt, user_prompt):
+        estimated = (len(system_prompt) + len(user_prompt)) // CHARS_PER_TOKEN
+        if estimated + RESPONSE_HEADROOM_TOKENS > self.num_ctx:
+            logger.warning(
+                "Prompt is roughly %d tokens against num_ctx=%d -- Ollama will "
+                "truncate it silently and the last findings in this batch will "
+                "lose their wording. Raise llm.num_ctx or lower "
+                "llm.max_findings_per_request in config/settings.json.",
+                estimated,
+                self.num_ctx,
+            )
+
     def complete_json(self, system_prompt, user_prompt):
+        self._warn_if_prompt_is_large(system_prompt, user_prompt)
+        options = {"temperature": self.temperature, "num_ctx": self.num_ctx}
+        if self.num_predict is not None:
+            options["num_predict"] = self.num_predict
         payload = {
             "model": self.model,
             "messages": [
@@ -48,7 +96,7 @@ class OllamaClient(LLMClient):
             # Ollama constrains decoding to valid JSON, so we don't have to
             # scrape a code block out of prose.
             "format": "json",
-            "options": {"temperature": self.temperature},
+            "options": options,
         }
         request = urllib.request.Request(
             f"{self.host}/api/chat",

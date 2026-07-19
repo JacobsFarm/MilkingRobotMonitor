@@ -1,13 +1,6 @@
 {
-    "source_collection": "milking_controle_data",
-    "feed_collection": "feed_distribution_data",
-    "production_collection": "milking_production_data",
-    "insights_collection": "milking_insights",
     "yield_divisor": 1000,
     "feed_divisor": 1000,
-    "recent_window_days": 7,
-    "baseline_window_days": 28,
-    "interval_seconds": 21600,
     "farm_context": {
         "herd_size": 120,
         "breed": "Holstein-Friesian",
@@ -15,25 +8,24 @@
         "housing": "year-round housing, no grazing",
         "typical_yield_liters_per_cow_day": 30,
         "calving_pattern": "year-round",
-        "notes": "Fill this in for your own farm; it is sent to the model as context so it stops reasoning from a generic average herd."
+        "notes": "Fill this in for your own farm; the model uses it as context when interpreting your questions."
     },
     "llm": {
         "provider": "ollama",
         "host": "http://localhost:11434",
-        "model": "gemma3:12b",
+        "model": "qwen3:8b",
         "temperature": 0.2,
-        "timeout_seconds": 180,
         "num_ctx": 16384,
-        "max_findings_per_request": 12,
-        "system_prompt": null,
-        "kind_guidance": {}
+        "timeout_seconds": 300,
+        "max_tool_rounds": 8,
+        "system_prompt": null
     },
     "vault": {
         "mode": "evault",
         "local_path": "../evault_local",
         "registry_url": "https://registry.w3ds.metastate.foundation",
         "w3id": "@your-farm-ename",
-        "platform": "melkmonitor-ai-agent",
+        "platform": "melkmonitor-chatbot",
         "schema_ids": {
             "milking_controle_data": "milking_controle_data",
             "milking_insights": "milking_insights",

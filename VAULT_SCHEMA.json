@@ -1,6 +1,6 @@
 {
   "$generated_by": "generate_vault_schema.py -- do not hand-edit, regenerate instead",
-  "$generated_at": "2026-07-18T16:24:01.144121+00:00",
+  "$generated_at": "2026-07-19T11:51:20.159327+00:00",
   "vault_path_pattern": "{collection}/{subject}/{record_id}",
   "note": "Every collection's ontology id is a plain stable string by default (the collection name itself) -- no Ontology-service registration required for store/fetch to work. See vault.schema_ids in a program's config/settings.json to map a collection to a registered Ontology W3ID instead, which is only needed for cross-platform interop.",
   "field_authority": {
@@ -55,7 +55,8 @@
       "written_by": "uploader (source type: milking_robot)",
       "read_by": [
         "dashboard (/api/records, /api/stats)",
-        "agent (analyses it, writes milking_insights)"
+        "agent (analyses it, writes milking_insights)",
+        "chatbot (ad-hoc questions over any collection, schema-driven)"
       ],
       "ontology_id": "milking_controle_data",
       "vault_path_pattern": "{collection}/{animal_number}/{id}",
@@ -119,7 +120,8 @@
       "written_by": "uploader (source type: feed_distribution)",
       "read_by": [
         "dashboard (/api/stats: feed x milk join, efficiency, leftovers)",
-        "agent (cow_feed_left, herd_feed_efficiency_change findings)"
+        "agent (cow_feed_left, herd_feed_efficiency_change findings)",
+        "chatbot (ad-hoc questions over any collection, schema-driven)"
       ],
       "ontology_id": "feed_distribution_data",
       "vault_path_pattern": "{collection}/{animal_number}/{id}",
@@ -188,7 +190,8 @@
       "written_by": "uploader (source type: production_report)",
       "read_by": [
         "dashboard (/api/stats: speed/lactation scatter)",
-        "agent (cow_speed_drop findings)"
+        "agent (cow_speed_drop findings, lactation data)",
+        "chatbot (ad-hoc questions over any collection, schema-driven)"
       ],
       "ontology_id": "milking_production_data",
       "vault_path_pattern": "{collection}/{animal_number}/{id}",
@@ -256,7 +259,8 @@
       "status": "active",
       "written_by": "agent (local LLM analysis of milking_controle_data)",
       "read_by": [
-        "dashboard (/api/insights)"
+        "dashboard (/api/insights)",
+        "chatbot (ad-hoc questions over any collection, schema-driven)"
       ],
       "ontology_id": "milking_insights",
       "vault_path_pattern": "{collection}/{type}/{id}",
@@ -289,7 +293,9 @@
             "cow_interval_rise": "one cow visits the robot noticeably less often",
             "cow_feed_left": "one cow repeatedly leaves feed uneaten (early illness signal)",
             "herd_feed_efficiency_change": "liters of milk per kg of feed moved vs baseline",
-            "cow_speed_drop": "one cow's milking speed dropped between production reports"
+            "cow_speed_drop": "one cow's milking speed dropped between production reports",
+            "cow_multi_signal": "several independent analyses flagged the SAME cow in the same period -- the pattern most easily missed when scanning a list of single-quantity findings",
+            "cow_recovered": "one cow dipped clearly below her own baseline and is back at her level -- positive: closes the loop on an earlier drop"
           },
           "example": "cow_yield_drop"
         },

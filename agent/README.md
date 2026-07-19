@@ -16,6 +16,20 @@ That matters for three reasons:
 
 If the model is unreachable, the agent still stores the findings — with the plain machine-written summary instead of a written explanation. A missing model degrades the wording, never the detection.
 
+## How the model is steered
+
+Wording quality is decided in [`app/prompting.py`](app/prompting.py), not by making the prompt longer. Three things happen there:
+
+- **Findings are grouped per cow.** `analysis.py` emits one finding per detection, so a single cow can appear three times. Sent flat, the model writes three unrelated notes and the farmer reads three small problems; sent grouped, it can write about one animal going downhill — which is what the data actually says.
+- **Domain guidance is attached per finding type.** A finding says "yield down 18%"; `KIND_GUIDANCE` supplies the shortlist of causes worth checking. Only the types actually present are sent, so the prompt stays small.
+- **The farm's own context is injected** from `farm_context` in settings, so the model stops reasoning about a generic average herd.
+
+Requests are **batched** (default 12 findings, groups are never split). Asking one call to word forty findings degrades all forty, and a single malformed reply would cost the wording of the entire run instead of one batch.
+
+### Context window
+
+`llm.num_ctx` is sent explicitly on every request. This matters: Ollama's own default is small (4k on current builds) and it truncates an oversized prompt **without reporting it** — the model answers about the findings it still saw, the rest silently fall back to their machine summary, and nothing says why. The agent logs a warning when a prompt approaches `num_ctx`, so the failure is visible instead of silent.
+
 ## What it looks for
 
 From `milking_controle_data`:
@@ -26,6 +40,7 @@ From `milking_controle_data`:
 | `herd_failure_rate` | share of milkings not finishing normally is high |
 | `cow_yield_drop` / `cow_yield_rise` | a cow deviates from **her own** baseline (not the herd average) |
 | `cow_interval_rise` | a cow visits the robot noticeably less often — often the first visible sign something is wrong |
+| `cow_recovered` | **good news**: a cow dipped ≥15% below her own baseline and is back within 5% of it — closes the loop on an earlier drop ("the intervention worked", or "she sorted it out herself, keep half an eye on her") |
 
 Cross-dataset, joined against the same windows:
 
@@ -39,6 +54,18 @@ Each comparison uses a recent window (default 7 days) against a preceding baseli
 
 Adding a new analysis = one more function returning findings in the same shape, appended in `build_findings()`.
 
+### The finding that reads the other findings
+
+| Finding | Meaning |
+|---|---|
+| `cow_multi_signal` | **two or more** of the concerning analyses above flagged the *same* cow in the same period |
+
+This is the one a farmer is most likely to miss, and the reason it is computed separately. Every other analysis compares one quantity against one threshold, so a cow drifting downhill on several fronts shows up as two or three *unremarkable* entries — each just barely over its threshold, each scattered among dozens of others. Nothing in a per-quantity list ever says "these are the same animal".
+
+The signals aren't independent in reality either: fewer robot visits, feed left uneaten and a slower milking are the textbook early course of lameness or mastitis, roughly in that order. Seeing them coincide is much stronger evidence than any one of them crossing its threshold.
+
+It derives entirely from findings that already exist (`correlation_findings()` in `analysis.py`), so it obeys the same rule as everything else: the numbers come from the analyses above, this only reports which of them landed on the same cow. Its `evidence` carries the underlying figures per signal, so the insight stays auditable without joining the other records.
+
 ## Requirements
 
 [Ollama](https://ollama.com) running locally:
@@ -49,6 +76,8 @@ ollama pull gemma3:12b
 ```
 
 Any chat model works, because the agent never asks the model to call tools — only to interpret findings Python already calculated. Gemma is a good fit for that. (If you later build an interactive chat that lets the model query the vault itself, models trained for tool-calling such as Qwen 2.5 or Llama 3.1+ are the safer pick.)
+
+Running a reasoning model such as `qwen3`: its thinking tokens are generated inside the same window and *before* the JSON, so with `format: json` it can spend the budget reasoning and return a truncated object. Use an instruct variant, disable thinking, or give it a generous `num_ctx`.
 
 Apart from Ollama: standard library only, no `pip install`.
 
@@ -98,6 +127,7 @@ agent/
     ├── config.py            Loads settings, vault fingerprint for the cache
     ├── cache.py             Local record cache (see above)
     ├── analysis.py          ALL the arithmetic — findings with hard numbers
+    ├── prompting.py         Grouping, farm context and domain guidance -> prompts
     ├── insights.py          The milking_insights record shape + schema
     ├── analyst.py           Orchestrates: read -> analyse -> explain -> store
     └── llm/
@@ -118,7 +148,14 @@ agent/
 - `llm.provider` — `ollama` today. Add a hosted backend by registering it in `app/llm/__init__.py`; nothing else changes.
 - `llm.model` — e.g. `gemma3:12b`. Must be a model you have pulled.
 - `llm.temperature` — kept low (0.2): this is analysis, not creative writing.
+- `llm.num_ctx` — context window (default 16384). Raise it for a large herd; lower it if the model doesn't fit in VRAM — but then lower `max_findings_per_request` too.
+- `llm.max_findings_per_request` — findings per call (default 12). Groups are never split, so this is a target, not a hard cap.
+- `llm.system_prompt` — overrides the default instructions. Leave `null` to use the built-in one; set it to change tone or output language without editing code.
+- `llm.kind_guidance` — `{"cow_yield_drop": "..."}` to override or extend the built-in domain guidance per finding type, e.g. with something specific to your own herd.
+- `farm_context` — herd size, breed, housing, typical yield, free-form `notes`. Sent to the model as context. Unknown keys are passed through, so you can add anything you think it should know.
 - `vault.*` — same shape as the other programs. `platform` is this agent's own identity.
+
+`farm_context` and the `llm.*` additions are all optional — the agent runs with the defaults if your `settings.json` predates them. Copy the blocks from `settings.example.json` to use them.
 
 ## Adding a hosted model later
 

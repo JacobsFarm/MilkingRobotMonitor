@@ -17,31 +17,21 @@ from app.cache import RecordCache, load_records
 from app.config import CACHE_DIRECTORY, load_settings, vault_fingerprint
 from app.insights import build_insight_record, dataset_key, record_path
 from app.llm import LLMError, create_llm_client
+from app.prompting import (
+    batch_groups,
+    build_system_prompt,
+    build_user_prompt,
+    group_findings,
+    kinds_in,
+)
 from core.vault_client import create_vault_client
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("agent")
 
-SYSTEM_PROMPT = """\
-You are a dairy herd analyst assisting a cow dairy farmer.
-
-You will receive findings that have ALREADY been calculated from the farm's
-data (milking robot, feed distribution and production reports). Your job is to
-explain them, not to recalculate them.
-
-Rules:
-- Never invent, alter or recompute numbers. Only use the figures given.
-- If a finding has an obvious veterinary or management explanation, say so, but
-  make clear it is a possibility to check -- you cannot diagnose from yield data
-  alone.
-- Be concrete and short. A farmer should know what to do after reading it.
-
-Reply with JSON only, in exactly this shape:
-{"insights": [{"ref": <the finding's ref number>,
-               "title": "<one line in Dutch, max ~90 characters>",
-               "body": "<2-4 sentences in Dutch: what is happening and what to check>"}]}
-Return one entry per finding, keeping the same ref numbers.\
-"""
+# How many findings to put in one request. Findings are grouped per cow first
+# and a group is never split, so this is a target rather than a hard cap.
+DEFAULT_MAX_FINDINGS_PER_REQUEST = 12
 
 
 def parse_timestamp(value):
@@ -53,43 +43,60 @@ def parse_timestamp(value):
         return None
 
 
-def build_user_prompt(bundle):
-    numbered = [
-        {"ref": index, "kind": f["kind"], "severity": f["severity"],
-         "scope": f["scope"], "measured": f["summary"], "figures": f["metrics"]}
-        for index, f in enumerate(bundle["findings"])
-    ]
-    return (
-        "Context of the analysis:\n"
-        + json.dumps(bundle["context"], indent=2)
-        + "\n\nFindings calculated from the data:\n"
-        + json.dumps(numbered, indent=2)
+def explain(llm, bundle, settings):
+    """Ask the model to word each finding, in grouped batches.
+
+    Falls back to the machine-written summary wherever the model is unreachable
+    or replies with something unusable -- an insight with plain wording still
+    beats losing the finding. Batching keeps that fallback granular: one bad
+    reply costs the wording of one batch, not of the whole run.
+    """
+    findings = bundle["findings"]
+    groups = group_findings(findings)
+    batches = batch_groups(
+        groups,
+        settings.get("llm", {}).get(
+            "max_findings_per_request", DEFAULT_MAX_FINDINGS_PER_REQUEST
+        ),
     )
 
-
-def explain(llm, bundle):
-    """Ask the model to word each finding. Falls back to the machine-written
-    summary if the model is unreachable or replies with something unusable --
-    an insight with plain wording still beats losing the finding."""
-    findings = bundle["findings"]
-    try:
-        reply = llm.complete_json(SYSTEM_PROMPT, build_user_prompt(bundle))
-        entries = reply.get("insights") or []
-    except LLMError as error:
-        logger.warning("Model unavailable (%s); storing findings unworded.", error)
-        entries = []
-
     worded = {}
-    for entry in entries:
+    for number, batch in enumerate(batches, start=1):
+        system_prompt = build_system_prompt(settings, kinds_in(batch))
+        user_prompt = build_user_prompt(bundle["context"], batch)
+        if len(batches) > 1:
+            logger.info("Wording batch %d of %d (%d subjects)", number, len(batches), len(batch))
         try:
-            ref = int(entry["ref"])
-        except (KeyError, TypeError, ValueError):
+            reply = llm.complete_json(system_prompt, user_prompt)
+            entries = reply.get("insights") or []
+        except LLMError as error:
+            logger.warning(
+                "Model unavailable for batch %d (%s); those findings are stored "
+                "unworded.",
+                number,
+                error,
+            )
             continue
-        if 0 <= ref < len(findings):
-            title = str(entry.get("title") or "").strip()
-            body = str(entry.get("body") or "").strip()
-            if title or body:
-                worded[ref] = (title or findings[ref]["summary"], body)
+
+        for entry in entries:
+            try:
+                ref = int(entry["ref"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if 0 <= ref < len(findings):
+                title = str(entry.get("title") or "").strip()
+                body = str(entry.get("body") or "").strip()
+                if title or body:
+                    worded[ref] = (title or findings[ref]["summary"], body)
+
+    missing = len(findings) - len(worded)
+    if missing:
+        logger.warning(
+            "%d of %d findings came back unworded; they keep their calculated "
+            "summary.",
+            missing,
+            len(findings),
+        )
     return worded
 
 
@@ -133,7 +140,7 @@ def run_once(settings, vault, llm, refresh=False):
         logger.info("Nothing stands out -- no insights written.")
         return
 
-    worded = explain(llm, bundle)
+    worded = explain(llm, bundle, settings)
     now = datetime.now()
     analysis_date = now.strftime("%Y-%m-%d")
     created_at = now.isoformat(timespec="seconds")

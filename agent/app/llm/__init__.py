@@ -22,6 +22,8 @@ def create_llm_client(llm_config):
             model=llm_config.get("model", "gemma3"),
             temperature=llm_config.get("temperature", 0.2),
             timeout_seconds=llm_config.get("timeout_seconds", 180),
+            num_ctx=llm_config.get("num_ctx", 16384),
+            num_predict=llm_config.get("num_predict"),
         )
     raise ValueError(f"No constructor wired for provider '{provider}'")
 
